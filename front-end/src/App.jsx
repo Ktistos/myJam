@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import LoadingSpinner from './components/LoadingSpinner';
 import Modal from './components/Modal';
 import Header from './components/Header';
+import ImportSongModal from './components/ImportSongModal'; // Import the modal here
 
 // --- Page Imports ---
 import Profile from './pages/Profile';
@@ -58,8 +59,11 @@ export default function App() {
 
 
   // UI State
-  const [loading, setLoading] = useState(false); // No initial loading needed
+  const [loading, setLoading] = useState(false); // <-- THE FIX IS HERE
   const [modal, setModal] = useState(null); // { title, message }
+  
+  // --- ADD THIS STATE ---
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   
   // --- All Firebase useEffects have been removed ---
 
@@ -133,6 +137,11 @@ export default function App() {
     }));
 
     setModal({ title: "Success", message: "Song and default roles added!" });
+    
+    // --- ADD THIS LINE ---
+    // Close the import modal after a successful import
+    setIsImportModalOpen(false); 
+
     setLoading(false);
   };
 
@@ -228,7 +237,17 @@ export default function App() {
       case 'createJam':
         return <CreateJamForm onCreateJam={handleCreateJam} onCancel={goHome} />;
       case 'jamDetail':
-        return <JamDetail jam={currentJam} songs={currentSongs} onSongClick={navToSong} onAddSong={handleAddSong} onBack={goHome} />;
+        return (
+          <JamDetail
+            jam={currentJam}
+            songs={currentSongs}
+            onSongClick={navToSong}
+            onAddSong={handleAddSong}
+            onBack={goHome}
+            // --- PASS THE FUNCTION DOWN ---
+            onOpenImportModal={() => setIsImportModalOpen(Dtrue)}
+          />
+        );
       case 'songDetail':
         return <SongDetail song={currentSong} roles={currentRoles} onJoinRole={handleJoinRole} onLeaveRole={handleLeaveRole} onBack={navBackToJam} currentUserId={userId} />;
       case 'profile':
@@ -240,8 +259,28 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      {modal && <Modal title={modal.title} message={modal.message} onClose={() => setModal(null)} />}
-      <Header userId={userId} userName={userName} onNavProfile={navToProfile} onNavHome={goHome} />
+      {modal && (
+        <Modal
+          title={modal.title}
+          message={modal.message}
+          onClose={() => setModal(null)}
+        />
+      )}
+      
+      {/* --- RENDER THE IMPORT MODAL FROM THE TOP LEVEL --- */}
+      {isImportModalOpen && (
+        <ImportSongModal
+          onClose={() => setIsImportModalOpen(false)}
+          onImport={handleAddSong}
+        />
+      )}
+      
+      <Header
+        userId={userId}
+        userName={userName}
+        onNavProfile={navToProfile}
+        onNavHome={goHome}
+      />
       <main className="max-w-4xl mx-auto p-4">
         {renderView()}
       </main>
