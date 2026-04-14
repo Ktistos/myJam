@@ -50,7 +50,6 @@ What still must exist in your shell before `deploy`:
 
 - `APP_HOST`
 - `MINIO_API_HOST`
-- `MINIO_CONSOLE_HOST`
 - `POSTGRES_PASSWORD`
 - `MINIO_ROOT_USER`
 - `MINIO_ROOT_PASSWORD`
@@ -83,8 +82,6 @@ Required:
   - example: `jam.example.com`
 - `MINIO_API_HOST`
   - example: `minio.jam.example.com`
-- `MINIO_CONSOLE_HOST`
-  - example: `minio-console.jam.example.com`
 
 Optional:
 
@@ -112,8 +109,10 @@ Optional:
   - leave empty for same-host ingress routing
 - `MINIO_PUBLIC_URL`
   - default: `https://MINIO_API_HOST`
+- `MINIO_CONSOLE_HOST`
+  - example: `minio-console.jam.example.com`
 - `MINIO_CONSOLE_REDIRECT_URL`
-  - default: `https://MINIO_CONSOLE_HOST`
+  - default: `https://MINIO_CONSOLE_HOST` when `MINIO_CONSOLE_HOST` is set
 - `SPOTIFY_MARKET`
   - default: `US`
 

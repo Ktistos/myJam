@@ -47,7 +47,6 @@ Required environment:
   FRONTEND_IMAGE
   APP_HOST
   MINIO_API_HOST
-  MINIO_CONSOLE_HOST
   POSTGRES_PASSWORD
   MINIO_ROOT_USER
   MINIO_ROOT_PASSWORD
@@ -65,7 +64,8 @@ Optional:
   MINIO_STORAGE_SIZE         default: 10Gi
   APP_BASE_URL               default: https://APP_HOST
   MINIO_PUBLIC_URL           default: https://MINIO_API_HOST
-  MINIO_CONSOLE_REDIRECT_URL default: https://MINIO_CONSOLE_HOST
+  MINIO_CONSOLE_HOST         optional external hostname for the MinIO console
+  MINIO_CONSOLE_REDIRECT_URL default: https://MINIO_CONSOLE_HOST when set
   SPOTIFY_CLIENT_ID
   SPOTIFY_CLIENT_SECRET
   SPOTIFY_MARKET             default: US
@@ -177,10 +177,17 @@ apply_backend_config() {
 }
 
 apply_minio_tenant_secret() {
+  local config_env
+
+  config_env=$'export MINIO_ROOT_USER="'"${MINIO_ROOT_USER}"$'"\nexport MINIO_ROOT_PASSWORD="'"${MINIO_ROOT_PASSWORD}"$'"'
+  if [[ -n "${MINIO_CONSOLE_REDIRECT_URL}" ]]; then
+    config_env+=$'\nexport MINIO_BROWSER_REDIRECT_URL="'"${MINIO_CONSOLE_REDIRECT_URL}"$'"'
+  fi
+
   kubectl -n "${STORAGE_NAMESPACE}" create secret generic jam-minio-env-configuration \
     --from-literal=accesskey="${MINIO_ROOT_USER}" \
     --from-literal=secretkey="${MINIO_ROOT_PASSWORD}" \
-    --from-literal=config.env=$'export MINIO_ROOT_USER="'"${MINIO_ROOT_USER}"$'"\nexport MINIO_ROOT_PASSWORD="'"${MINIO_ROOT_PASSWORD}"$'"\nexport MINIO_BROWSER_REDIRECT_URL="'"${MINIO_CONSOLE_REDIRECT_URL}"$'"' \
+    --from-literal=config.env="${config_env}" \
     --dry-run=client -o yaml | kubectl apply -f -
 }
 
@@ -188,7 +195,6 @@ require_env BACKEND_IMAGE
 require_env FRONTEND_IMAGE
 require_env APP_HOST
 require_env MINIO_API_HOST
-require_env MINIO_CONSOLE_HOST
 require_env POSTGRES_PASSWORD
 require_env MINIO_ROOT_USER
 require_env MINIO_ROOT_PASSWORD
@@ -196,7 +202,9 @@ require_env FIREBASE_PROJECT_ID
 
 : "${APP_BASE_URL:=https://${APP_HOST}}"
 : "${MINIO_PUBLIC_URL:=https://${MINIO_API_HOST}}"
-: "${MINIO_CONSOLE_REDIRECT_URL:=https://${MINIO_CONSOLE_HOST}}"
+if [[ -n "${MINIO_CONSOLE_HOST}" && -z "${MINIO_CONSOLE_REDIRECT_URL}" ]]; then
+  MINIO_CONSOLE_REDIRECT_URL="https://${MINIO_CONSOLE_HOST}"
+fi
 
 tenant_args=(-e "s/storage: 10Gi/storage: ${MINIO_STORAGE_SIZE}/")
 if [[ -n "${MINIO_STORAGE_CLASS_NAME}" ]]; then
@@ -246,7 +254,11 @@ kubectl apply -f "${TMP_DIR}/minio-tenant.yaml"
 kubectl -n "${STORAGE_NAMESPACE}" wait --for=condition=Ready pod -l v1.min.io/tenant=jam-minio --timeout=10m
 
 if [[ "${APPLY_MINIO_INGRESS}" == "1" ]]; then
-  kubectl apply -f "${TMP_DIR}/minio-ingress.yaml"
+  if [[ -n "${MINIO_CONSOLE_HOST}" ]]; then
+    kubectl apply -f "${TMP_DIR}/minio-ingress.yaml"
+  else
+    awk 'BEGIN { seen = 0 } /^---$/ { exit } { print }' "${TMP_DIR}/minio-ingress.yaml" | kubectl apply -f -
+  fi
 fi
 
 echo "Running MinIO bucket bootstrap job..."
@@ -276,7 +288,7 @@ Deployment applied.
 
 App:            ${APP_BASE_URL}
 MinIO API:      ${MINIO_PUBLIC_URL}
-MinIO Console:  ${MINIO_CONSOLE_REDIRECT_URL}
+MinIO Console:  ${MINIO_CONSOLE_REDIRECT_URL:-not exposed externally}
 
 If Spotify login is enabled, add this redirect URI to the Spotify app:
   ${APP_BASE_URL}/spotify/callback

@@ -153,7 +153,6 @@ fi
 if [[ "${TARGET}" == "deploy" || "${TARGET}" == "all" ]]; then
   require_env APP_HOST
   require_env MINIO_API_HOST
-  require_env MINIO_CONSOLE_HOST
   require_env POSTGRES_PASSWORD
   require_env MINIO_ROOT_USER
   require_env MINIO_ROOT_PASSWORD
@@ -172,9 +171,14 @@ if [[ "${TARGET}" == "deploy" || "${TARGET}" == "all" ]]; then
   set_repo_variable APP_BASE_URL "${APP_BASE_URL:-}"
   set_repo_variable MINIO_API_HOST "${MINIO_API_HOST}"
   set_repo_variable MINIO_PUBLIC_URL "${MINIO_PUBLIC_URL:-}"
-  set_repo_variable MINIO_CONSOLE_HOST "${MINIO_CONSOLE_HOST}"
-  set_repo_variable MINIO_CONSOLE_REDIRECT_URL "${MINIO_CONSOLE_REDIRECT_URL:-}"
   set_repo_variable SPOTIFY_MARKET "${SPOTIFY_MARKET}"
+
+  if [[ -n "${MINIO_CONSOLE_HOST:-}" ]]; then
+    set_repo_variable MINIO_CONSOLE_HOST "${MINIO_CONSOLE_HOST}"
+  fi
+  if [[ -n "${MINIO_CONSOLE_REDIRECT_URL:-}" ]]; then
+    set_repo_variable MINIO_CONSOLE_REDIRECT_URL "${MINIO_CONSOLE_REDIRECT_URL}"
+  fi
 
   set_repo_secret KUBECONFIG_B64 "${KUBECONFIG_B64}"
   set_repo_secret POSTGRES_PASSWORD "${POSTGRES_PASSWORD}"
