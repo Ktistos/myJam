@@ -3,15 +3,18 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
+MINIKUBE_IP="${MINIKUBE_IP:-$(minikube -p "${MINIKUBE_PROFILE}" ip 2>/dev/null || echo 127.0.0.1)}"
 APP_NAMESPACE="jam"
 STORAGE_NAMESPACE="jam-storage"
 OPERATOR_NAMESPACE="minio-operator"
 BACKEND_IMAGE="${BACKEND_IMAGE:-jam-backend:minikube}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-jam-frontend:minikube}"
-APP_HOST="jam.127.0.0.1.nip.io"
-MINIO_API_HOST="minio.jam.127.0.0.1.nip.io"
-MINIO_CONSOLE_HOST="minio-console.jam.127.0.0.1.nip.io"
+APP_HOST="${APP_HOST:-jam.${MINIKUBE_IP}.nip.io}"
+MINIO_API_HOST="${MINIO_API_HOST:-minio.jam.${MINIKUBE_IP}.nip.io}"
+MINIO_CONSOLE_HOST="${MINIO_CONSOLE_HOST:-minio-console.jam.${MINIKUBE_IP}.nip.io}"
 MINIO_OPERATOR_REF="${MINIO_OPERATOR_REF:-v7.1.1}"
+MINIO_OPERATOR_REPLICAS="${MINIO_OPERATOR_REPLICAS:-1}"
+MINIO_STORAGE_CLASS_NAME="${MINIO_STORAGE_CLASS_NAME:-standard}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-password}"
 MINIO_ROOT_USER="${MINIO_ROOT_USER:-minioadmin}"
 MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-minioadmin123}"
@@ -28,6 +31,16 @@ require_env() {
 }
 
 require_env FIREBASE_PROJECT_ID
+
+render_ingress_manifest() {
+  local src="$1"
+
+  sed \
+    -e "s/host: jam.127.0.0.1.nip.io/host: ${APP_HOST}/g" \
+    -e "s/host: minio.jam.127.0.0.1.nip.io/host: ${MINIO_API_HOST}/g" \
+    -e "s/host: minio-console.jam.127.0.0.1.nip.io/host: ${MINIO_CONSOLE_HOST}/g" \
+    "${src}"
+}
 
 apply_backend_config() {
   kubectl -n "${APP_NAMESPACE}" create configmap jam-backend-config \
@@ -70,10 +83,10 @@ minikube -p "${MINIKUBE_PROFILE}" addons enable ingress
 
 echo "Applying namespaces and storage class..."
 kubectl apply -f "${ROOT_DIR}/k8s/minikube/namespaces.yaml"
-kubectl apply -f "${ROOT_DIR}/k8s/minikube/storageclass.yaml"
 
 echo "Installing/refreshing MinIO Operator ${MINIO_OPERATOR_REF}..."
 kubectl apply -k "github.com/minio/operator?ref=${MINIO_OPERATOR_REF}"
+kubectl -n "${OPERATOR_NAMESPACE}" scale deployment/minio-operator --replicas="${MINIO_OPERATOR_REPLICAS}"
 kubectl -n "${OPERATOR_NAMESPACE}" rollout status deployment/minio-operator --timeout=5m
 
 echo "Creating app configuration..."
@@ -88,9 +101,13 @@ kubectl -n "${APP_NAMESPACE}" rollout status statefulset/postgres --timeout=5m
 kubectl -n "${APP_NAMESPACE}" rollout status deployment/redis --timeout=5m
 
 echo "Deploying MinIO tenant..."
-kubectl apply -f "${ROOT_DIR}/k8s/minikube/minio-tenant.yaml"
+sed "s/storageClassName: minio-wffc/storageClassName: ${MINIO_STORAGE_CLASS_NAME}/" \
+  "${ROOT_DIR}/k8s/minikube/minio-tenant.yaml" | kubectl apply -f -
+until kubectl -n "${STORAGE_NAMESPACE}" get pod -l v1.min.io/tenant=jam-minio -o name | grep -q .; do
+  sleep 2
+done
 kubectl -n "${STORAGE_NAMESPACE}" wait --for=condition=Ready pod -l v1.min.io/tenant=jam-minio --timeout=10m
-kubectl apply -f "${ROOT_DIR}/k8s/minikube/minio-ingress.yaml"
+render_ingress_manifest "${ROOT_DIR}/k8s/minikube/minio-ingress.yaml" | kubectl apply -f -
 
 echo "Running MinIO bucket bootstrap job..."
 kubectl -n "${STORAGE_NAMESPACE}" delete job jam-minio-public-bucket --ignore-not-found
@@ -99,7 +116,8 @@ kubectl -n "${STORAGE_NAMESPACE}" wait --for=condition=complete job/jam-minio-pu
 
 echo "Running database migration job..."
 kubectl -n "${APP_NAMESPACE}" delete job jam-backend-migrate --ignore-not-found
-kubectl set image -f "${ROOT_DIR}/k8s/minikube/backend-migrate-job.yaml" migrate="${BACKEND_IMAGE}" --local -o yaml | kubectl apply -f -
+sed "s|image: jam-backend:minikube|image: ${BACKEND_IMAGE}|" \
+  "${ROOT_DIR}/k8s/minikube/backend-migrate-job.yaml" | kubectl apply -f -
 kubectl -n "${APP_NAMESPACE}" wait --for=condition=complete job/jam-backend-migrate --timeout=5m
 
 echo "Deploying backend and frontend..."
@@ -107,7 +125,7 @@ kubectl apply -f "${ROOT_DIR}/k8s/minikube/backend.yaml"
 kubectl apply -f "${ROOT_DIR}/k8s/minikube/frontend.yaml"
 kubectl -n "${APP_NAMESPACE}" set image deployment/jam-backend backend="${BACKEND_IMAGE}"
 kubectl -n "${APP_NAMESPACE}" set image deployment/jam-frontend frontend="${FRONTEND_IMAGE}"
-kubectl apply -f "${ROOT_DIR}/k8s/minikube/app-ingress.yaml"
+render_ingress_manifest "${ROOT_DIR}/k8s/minikube/app-ingress.yaml" | kubectl apply -f -
 kubectl -n "${APP_NAMESPACE}" rollout status deployment/jam-backend --timeout=5m
 kubectl -n "${APP_NAMESPACE}" rollout status deployment/jam-frontend --timeout=5m
 

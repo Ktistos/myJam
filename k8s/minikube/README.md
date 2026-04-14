@@ -26,17 +26,17 @@ The app uses direct S3-compatible object uploads and public object URLs. For Min
 
 - MinIO Operator in `minio-operator`
 - one MinIO Tenant in `jam-storage`
-- a MinIO-specific `StorageClass` with `WaitForFirstConsumer`
+- the cluster's existing `standard` storage class by default
 
-That layout matches MinIO's current Operator guidance more closely than a plain Deployment, while still keeping the local footprint small.
+That layout matches MinIO's current Operator guidance more closely than a plain Deployment, while still keeping the local footprint small. On this Minikube setup, the deploy script uses the working `standard` storage class by default instead of the custom `WaitForFirstConsumer` class.
 
-## Fixed Local Hosts
+## Local Hosts
 
-The manifests target these local ingress hosts:
+The helper script derives the ingress hosts from your current Minikube IP, for example when `minikube ip` is `192.168.49.2`:
 
-- App: `http://jam.127.0.0.1.nip.io`
-- MinIO API / public objects: `http://minio.jam.127.0.0.1.nip.io`
-- MinIO Console: `http://minio-console.jam.127.0.0.1.nip.io`
+- App: `http://jam.192.168.49.2.nip.io`
+- MinIO API / public objects: `http://minio.jam.192.168.49.2.nip.io`
+- MinIO Console: `http://minio-console.jam.192.168.49.2.nip.io`
 
 The frontend image is built with `VITE_API_URL=""`, so the browser talks to the backend through the same app ingress host.
 
@@ -104,9 +104,10 @@ source scripts/minikube-env.sh
 That helper loads Firebase values from `.env` and `front-end/.env.local`, then
 exports the Minikube-local defaults:
 
-- `APP_HOST=jam.127.0.0.1.nip.io`
-- `MINIO_API_HOST=minio.jam.127.0.0.1.nip.io`
-- `MINIO_CONSOLE_HOST=minio-console.jam.127.0.0.1.nip.io`
+- `MINIKUBE_IP=$(minikube ip)`
+- `APP_HOST=jam.${MINIKUBE_IP}.nip.io`
+- `MINIO_API_HOST=minio.jam.${MINIKUBE_IP}.nip.io`
+- `MINIO_CONSOLE_HOST=minio-console.jam.${MINIKUBE_IP}.nip.io`
 - `POSTGRES_PASSWORD=password`
 - `MINIO_ROOT_USER=minioadmin`
 - `MINIO_ROOT_PASSWORD=minioadmin123`

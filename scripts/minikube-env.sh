@@ -2,6 +2,9 @@
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+: "${MINIKUBE_PROFILE:=minikube}"
+: "${MINIKUBE_IP:=$(minikube -p "${MINIKUBE_PROFILE}" ip 2>/dev/null || echo 127.0.0.1)}"
+
 load_env_file() {
   local file="$1"
 
@@ -18,12 +21,13 @@ load_env_file "${ROOT_DIR}/front-end/.env.local"
 
 : "${VITE_FIREBASE_PROJECT_ID:=${FIREBASE_PROJECT_ID:-}}"
 
-export MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
+export MINIKUBE_PROFILE
+export MINIKUBE_IP
 export BACKEND_IMAGE="${BACKEND_IMAGE:-jam-backend:minikube}"
 export FRONTEND_IMAGE="${FRONTEND_IMAGE:-jam-frontend:minikube}"
-export APP_HOST="${APP_HOST:-jam.127.0.0.1.nip.io}"
-export MINIO_API_HOST="${MINIO_API_HOST:-minio.jam.127.0.0.1.nip.io}"
-export MINIO_CONSOLE_HOST="${MINIO_CONSOLE_HOST:-minio-console.jam.127.0.0.1.nip.io}"
+export APP_HOST="${APP_HOST:-jam.${MINIKUBE_IP}.nip.io}"
+export MINIO_API_HOST="${MINIO_API_HOST:-minio.jam.${MINIKUBE_IP}.nip.io}"
+export MINIO_CONSOLE_HOST="${MINIO_CONSOLE_HOST:-minio-console.jam.${MINIKUBE_IP}.nip.io}"
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-password}"
 export MINIO_ROOT_USER="${MINIO_ROOT_USER:-minioadmin}"
 export MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-minioadmin123}"
@@ -37,6 +41,7 @@ Source this file before building or deploying to Minikube:
 
 Current Minikube values:
   MINIKUBE_PROFILE=${MINIKUBE_PROFILE}
+  MINIKUBE_IP=${MINIKUBE_IP}
   BACKEND_IMAGE=${BACKEND_IMAGE}
   FRONTEND_IMAGE=${FRONTEND_IMAGE}
   APP_HOST=${APP_HOST}

@@ -43,7 +43,8 @@ fi
 if [[ "${TARGET}" == "backend" || "${TARGET}" == "all" ]]; then
   if [[ "${RUN_BACKEND_MIGRATION}" == "1" ]]; then
     kubectl -n "${APP_NAMESPACE}" delete job jam-backend-migrate --ignore-not-found
-    kubectl set image -f "${ROOT_DIR}/k8s/minikube/backend-migrate-job.yaml" migrate="${BACKEND_IMAGE}" --local -o yaml | kubectl apply -f -
+    sed "s|image: jam-backend:minikube|image: ${BACKEND_IMAGE}|" \
+      "${ROOT_DIR}/k8s/minikube/backend-migrate-job.yaml" | kubectl apply -f -
     kubectl -n "${APP_NAMESPACE}" wait --for=condition=complete job/jam-backend-migrate --timeout=5m
   fi
 
