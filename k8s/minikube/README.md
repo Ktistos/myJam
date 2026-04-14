@@ -45,6 +45,7 @@ The frontend image is built with `VITE_API_URL=""`, so the browser talks to the 
 Use the repo scripts:
 
 ```bash
+source scripts/minikube-env.sh
 bash scripts/minikube-build-images.sh
 bash scripts/minikube-deploy.sh
 ```
@@ -94,7 +95,23 @@ For GitHub Actions + GHCR deployment to a reachable cluster, see
 
 ## Required Environment
 
-The deploy/build scripts expect these variables in your shell:
+The simplest path is to source the repo helper first:
+
+```bash
+source scripts/minikube-env.sh
+```
+
+That helper loads Firebase values from `.env` and `front-end/.env.local`, then
+exports the Minikube-local defaults:
+
+- `APP_HOST=jam.127.0.0.1.nip.io`
+- `MINIO_API_HOST=minio.jam.127.0.0.1.nip.io`
+- `MINIO_CONSOLE_HOST=minio-console.jam.127.0.0.1.nip.io`
+- `POSTGRES_PASSWORD=password`
+- `MINIO_ROOT_USER=minioadmin`
+- `MINIO_ROOT_PASSWORD=minioadmin123`
+
+The build/deploy scripts still expect these Firebase variables in your shell:
 
 - `FIREBASE_PROJECT_ID`
 - `VITE_FIREBASE_API_KEY`
