@@ -544,40 +544,26 @@ export default function App() {
 
   // ── Create Jam ─────────────────────────────────────────────────────────────
   const handleCreateJam = async (name, date, locationData, visibility) => {
-    let newJam;
+    if (!firebaseUser) {
+      setCurrentView('jamList');
+      setModal({ title: 'Sign In Required', message: 'You must sign in to create a jam.' });
+      return;
+    }
 
-    if (firebaseUser) {
-      try {
-        const backendJam = await api.createJam({
-          name,
-          date,
-          visibility,
-          address: locationData.address,
-          lat: locationData.lat,
-          lng: locationData.lng,
-        });
-        newJam = normalizeJam(backendJam);
-      } catch (e) {
-        setModal({ title: 'Error', message: `Could not create jam: ${e.message}` });
-        return;
-      }
-    } else {
-      // Guest / offline fallback — local state only
-      newJam = {
-        id: uid(),
+    let newJam;
+    try {
+      const backendJam = await api.createJam({
         name,
         date,
-        location: locationData,
         visibility,
-        state: 'initial',
-        admins: [userId],
-        inviteCode: visibility === 'private' ? Math.random().toString(36).substring(2, 8).toUpperCase() : null,
-        settings: { requireRoleApproval: false, requireSongApproval: false },
-        currentSongId: null,
-        participantCount: 1,
-        isParticipant: true,
-      };
-      newJam.invite_code = newJam.inviteCode;
+        address: locationData.address,
+        lat: locationData.lat,
+        lng: locationData.lng,
+      });
+      newJam = normalizeJam(backendJam);
+    } catch (e) {
+      setModal({ title: 'Error', message: `Could not create jam: ${e.message}` });
+      return;
     }
 
     setJams((prev) => [...prev, newJam]);
@@ -1442,7 +1428,14 @@ export default function App() {
           <JamList
             jams={jams}
             onJamClick={handleNavJam}
-            onNavCreate={() => setCurrentView('createJam')}
+            onNavCreate={() => {
+              if (isGuest) {
+                setGuestMode(false);
+                return;
+              }
+              setCurrentView('createJam');
+            }}
+            onRequireSignIn={() => setGuestMode(false)}
             userLocation={userLocation}
             onRequestLocation={() => import('./utils/geo').then(m => m.getUserLocation()).then(setUserLocation).catch(() => {})}
             participantsByJamId={participantsByJamId}

@@ -88,6 +88,7 @@ const JamList = ({
   jams,
   onJamClick,
   onNavCreate,
+  onRequireSignIn,
   userLocation,
   onRequestLocation,
   participantsByJamId,
@@ -236,9 +237,18 @@ const JamList = ({
               <p className="text-gray-500 text-sm mb-5">
                 {radiusKm ? `No jams within ${radiusKm} km of your location.` : 'Be the first to create one!'}
               </p>
-              <button onClick={onNavCreate} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg transition">
-                + Create a Jam
-              </button>
+              {isGuest ? (
+                <button
+                  onClick={onRequireSignIn}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg transition"
+                >
+                  Sign in to Create a Jam
+                </button>
+              ) : (
+                <button onClick={onNavCreate} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg transition">
+                  + Create a Jam
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

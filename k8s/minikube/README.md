@@ -130,6 +130,27 @@ Optional:
 - `MINIO_ROOT_USER` (defaults to `minioadmin`)
 - `MINIO_ROOT_PASSWORD` (defaults to `minioadmin123`)
 
+## Local Social Login
+
+Google and Facebook login depend on your Firebase project configuration, not
+just the app env vars.
+
+For the Minikube app host shown above, make sure Firebase Authentication is set
+up like this:
+
+- Google provider enabled
+- Facebook provider enabled
+- `jam.${MINIKUBE_IP}.nip.io` added under Firebase Authentication > Settings >
+  Authorized domains
+
+For Facebook specifically, the Meta app also needs Firebase's redirect handler
+URL in its allowed OAuth redirect URIs:
+
+- `https://${VITE_FIREBASE_AUTH_DOMAIN}/__/auth/handler`
+
+If that configuration is missing, the frontend now surfaces the Firebase error
+instead of failing with a generic sign-in message.
+
 ## Notes
 
 - The backend image no longer runs `alembic upgrade head` on startup. Compose still does that explicitly so the existing local Docker workflow keeps working.

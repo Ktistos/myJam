@@ -52,4 +52,17 @@ describe('Login', () => {
 
     resolve(); // unblock
   });
+
+  it('shows an actionable unauthorized-domain error for Google', async () => {
+    const { signInWithGoogle } = await import('../services/firebase');
+    signInWithGoogle.mockRejectedValue({
+      code: 'auth/unauthorized-domain',
+      message: 'Firebase: Error (auth/unauthorized-domain).',
+    });
+
+    render(<Login onGuest={() => {}} />);
+    fireEvent.click(screen.getByText(/continue with google/i));
+
+    expect(await screen.findByText(/authorized domains/i)).toBeInTheDocument();
+  });
 });

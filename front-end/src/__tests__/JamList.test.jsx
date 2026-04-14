@@ -17,6 +17,7 @@ const defaultProps = {
   jams: [],
   onJamClick: vi.fn(),
   onNavCreate: vi.fn(),
+  onRequireSignIn: vi.fn(),
   userLocation: null,
   onRequestLocation: vi.fn(),
   participantsByJamId: {},
@@ -42,6 +43,14 @@ describe('JamList — empty discover state', () => {
     render(<JamList {...defaultProps} onNavCreate={onNavCreate} />);
     fireEvent.click(screen.getByRole('button', { name: /\+ create a jam/i }));
     expect(onNavCreate).toHaveBeenCalledOnce();
+  });
+
+  it('guest empty state shows sign-in CTA instead of create-jam CTA', () => {
+    const onRequireSignIn = vi.fn();
+    render(<JamList {...defaultProps} isGuest onRequireSignIn={onRequireSignIn} />);
+    fireEvent.click(screen.getByRole('button', { name: /sign in to create a jam/i }));
+    expect(onRequireSignIn).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: /\+ create a jam/i })).not.toBeInTheDocument();
   });
 });
 

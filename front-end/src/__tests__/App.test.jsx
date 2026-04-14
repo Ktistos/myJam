@@ -209,6 +209,21 @@ describe('App interactions', () => {
     });
   });
 
+  it('returns a guest user to the login screen when they hit the create-jam CTA from an empty guest list', async () => {
+    onAuthStateChanged.mockImplementation((_auth, callback) => {
+      callback(null);
+      return () => {};
+    });
+    api.listJams.mockResolvedValue([]);
+
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('button', { name: /browse public jams near me/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /sign in to create a jam/i }));
+
+    expect(await screen.findByText(/continue with google/i)).toBeInTheDocument();
+  });
+
   it('supports logged-in jam and song navigation with role claiming clicks', async () => {
     onAuthStateChanged.mockImplementation((_auth, callback) => {
       callback({ uid: 'uid-1', displayName: 'Alex', photoURL: '' });

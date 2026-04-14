@@ -1,6 +1,36 @@
 import React, { useState } from 'react';
 import { signInWithGoogle, signInWithFacebook } from '../services/firebase';
 
+const getCurrentHost = () =>
+  typeof window !== 'undefined' ? window.location.hostname : 'this host';
+
+function formatAuthError(providerLabel, error) {
+  const code = error?.code ?? '';
+
+  if (code === 'auth/unauthorized-domain') {
+    return `${providerLabel} sign-in is blocked for ${getCurrentHost()}. Add this hostname to Firebase Authentication > Settings > Authorized domains and try again.`;
+  }
+
+  if (code === 'auth/operation-not-allowed') {
+    return `${providerLabel} sign-in is not enabled in Firebase Authentication for this project.`;
+  }
+
+  if (code === 'auth/popup-blocked') {
+    return `${providerLabel} sign-in popup was blocked by the browser. Allow popups and try again.`;
+  }
+
+  if (code === 'auth/popup-closed-by-user') {
+    return `${providerLabel} sign-in was cancelled before completion.`;
+  }
+
+  const detail = error?.message?.trim();
+  if (detail) {
+    return `${providerLabel} sign-in failed: ${detail}`;
+  }
+
+  return `${providerLabel} sign-in failed. Please try again.`;
+}
+
 const Login = ({ onGuest }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(null); // 'google' | 'facebook' | null
@@ -11,7 +41,7 @@ const Login = ({ onGuest }) => {
     try {
       await signInWithGoogle();
     } catch (e) {
-      setError('Google sign-in failed. Please try again.');
+      setError(formatAuthError('Google', e));
     } finally {
       setLoading(null);
     }
@@ -23,7 +53,7 @@ const Login = ({ onGuest }) => {
     try {
       await signInWithFacebook();
     } catch (e) {
-      setError('Facebook sign-in failed. Please try again.');
+      setError(formatAuthError('Facebook', e));
     } finally {
       setLoading(null);
     }
