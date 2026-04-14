@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jam
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jam-storage
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio-operator

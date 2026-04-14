@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jam-minio-public-bucket
+  namespace: jam-storage
+spec:
+  backoffLimit: 4
+  template:
+    metadata:
+      labels:
+        app: jam-minio-public-bucket
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2025-07-21T05-28-08Z
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: jam-minio-env-configuration
+                  key: accesskey
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jam-minio-env-configuration
+                  key: secretkey
+          command:
+            - /bin/sh
+            - -ceu
+            - |
+              mc alias set jam http://minio.jam-storage.svc.cluster.local "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}"
+              mc mb --ignore-existing jam/avatars
+              mc anonymous set download jam/avatars

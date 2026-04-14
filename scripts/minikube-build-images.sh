@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
+BACKEND_IMAGE="${BACKEND_IMAGE:-jam-backend:minikube}"
+FRONTEND_IMAGE="${FRONTEND_IMAGE:-jam-frontend:minikube}"
+
+require_env() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    echo "Missing required environment variable: $name" >&2
+    exit 1
+  fi
+}
+
+: "${VITE_FIREBASE_PROJECT_ID:=${FIREBASE_PROJECT_ID:-}}"
+
+require_env FIREBASE_PROJECT_ID
+require_env VITE_FIREBASE_API_KEY
+require_env VITE_FIREBASE_AUTH_DOMAIN
+require_env VITE_FIREBASE_PROJECT_ID
+require_env VITE_FIREBASE_STORAGE_BUCKET
+require_env VITE_FIREBASE_MESSAGING_SENDER_ID
+require_env VITE_FIREBASE_APP_ID
+
+eval "$(minikube -p "${MINIKUBE_PROFILE}" docker-env)"
+
+docker build \
+  -t "${BACKEND_IMAGE}" \
+  "${ROOT_DIR}/backend"
+
+docker build \
+  -t "${FRONTEND_IMAGE}" \
+  --build-arg "VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}" \
+  --build-arg "VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}" \
+  --build-arg "VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}" \
+  --build-arg "VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}" \
+  --build-arg "VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}" \
+  --build-arg "VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}" \
+  --build-arg "VITE_API_URL=" \
+  "${ROOT_DIR}/front-end"
+
+echo "Built ${BACKEND_IMAGE} and ${FRONTEND_IMAGE} inside Minikube profile ${MINIKUBE_PROFILE}."

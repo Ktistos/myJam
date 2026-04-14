@@ -13,16 +13,13 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer()
+optional_bearer_scheme = HTTPBearer(auto_error=False)
 
 # Reusable HTTP session for fetching Firebase public keys (cached internally by google-auth)
 _http_request = google_requests.Request()
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db: Session = Depends(get_db),
-) -> User:
-    token = credentials.credentials
+def get_uid_for_token(token: str) -> str:
     try:
         # verify_firebase_token downloads Google's public keys over HTTPS and
         # verifies the JWT locally — no service account / ADC required.
@@ -39,7 +36,11 @@ def get_current_user(
         )
 
     # Firebase UID is the standard JWT 'sub' claim
-    uid = decoded["sub"]
+    return decoded["sub"]
+
+
+def get_user_for_token(token: str, db: Session) -> User:
+    uid = get_uid_for_token(token)
     user = db.query(User).filter(User.id == uid).first()
     if not user:
         raise HTTPException(
@@ -47,3 +48,30 @@ def get_current_user(
             detail="User not found — call POST /users first",
         )
     return user
+
+
+def get_current_user_id(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> str:
+    return get_uid_for_token(credentials.credentials)
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    return get_user_for_token(credentials.credentials, db)
+
+
+def get_optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User | None:
+    if credentials is None:
+        return None
+    try:
+        return get_user_for_token(credentials.credentials, db)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            return None
+        raise

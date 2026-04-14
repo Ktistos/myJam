@@ -1,23 +1,30 @@
 import React, { useState } from 'react';
-import { instrumentLabel } from '../pages/Profile';
+import { INSTRUMENT_TYPES, instrumentLabel } from '../pages/Profile';
+
+const HARDWARE_INSTRUMENT_TYPES = INSTRUMENT_TYPES.filter((type) => type !== 'Vocals');
 
 const JoinJamModal = ({ jam, userInstruments, existingHardware, onConfirm, onCancel }) => {
-  const profileLabels = userInstruments.map((inst) => instrumentLabel(inst)).filter(Boolean);
+  const profileLabels = userInstruments
+    .map((inst) => instrumentLabel(inst))
+    .filter((label) => label && label !== 'Vocals');
 
   const [selected, setSelected]           = useState([]);
-  const [customInput, setCustomInput]     = useState('');
+  const [selectedType, setSelectedType]   = useState('');
+  const [selectedModel, setSelectedModel] = useState('');
 
   const toggle = (label) =>
     setSelected((prev) =>
       prev.includes(label) ? prev.filter((i) => i !== label) : [...prev, label]
     );
 
-  const addCustom = (e) => {
+  const addInstrument = (e) => {
     e?.preventDefault();
-    const trimmed = customInput.trim();
-    if (!trimmed || selected.includes(trimmed)) return;
-    setSelected((prev) => [...prev, trimmed]);
-    setCustomInput('');
+    if (!selectedType) return;
+    const label = instrumentLabel({ type: selectedType, model: selectedModel.trim() });
+    if (!label || selected.includes(label)) return;
+    setSelected((prev) => [...prev, label]);
+    setSelectedType('');
+    setSelectedModel('');
   };
 
   const removeSelected = (label) => setSelected((prev) => prev.filter((i) => i !== label));
@@ -32,7 +39,7 @@ const JoinJamModal = ({ jam, userInstruments, existingHardware, onConfirm, onCan
             What instruments are you bringing to this jam?
           </p>
           <p className="text-xs text-gray-500 mt-0.5">
-            Your selections are added to the jam's available hardware.
+            Your selections are added to the jam&apos;s available hardware. Vocals are always available as a role.
           </p>
         </div>
 
@@ -41,7 +48,7 @@ const JoinJamModal = ({ jam, userInstruments, existingHardware, onConfirm, onCan
           {profileLabels.length > 0 ? (
             <div>
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-                Your Instruments
+                Your Non-Vocal Instruments
               </p>
               <div className="space-y-2">
                 {profileLabels.map((label) => {
@@ -69,30 +76,45 @@ const JoinJamModal = ({ jam, userInstruments, existingHardware, onConfirm, onCan
             </div>
           ) : (
             <p className="text-sm text-gray-500 italic">
-              No instruments in your profile yet.{' '}
+              No non-vocal instruments in your profile yet.{' '}
               <span className="text-gray-400">Add them below or in your profile settings.</span>
             </p>
           )}
 
-          {/* Custom instrument input */}
+          {/* Instrument picker */}
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
               Add Another Instrument
             </p>
-            <form onSubmit={addCustom} className="flex gap-2">
+            <form onSubmit={addInstrument} className="space-y-2">
+              <select
+                aria-label="Additional hardware instrument"
+                value={selectedType}
+                onChange={(e) => {
+                  setSelectedType(e.target.value);
+                  setSelectedModel('');
+                }}
+                className="w-full bg-gray-700 text-white px-3 py-2 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="">Select an instrument…</option>
+                {HARDWARE_INSTRUMENT_TYPES.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
               <input
                 type="text"
-                value={customInput}
-                onChange={(e) => setCustomInput(e.target.value)}
-                placeholder="e.g. Drum Kit, Keyboard, PA System…"
-                className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm placeholder-gray-500"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                disabled={!selectedType}
+                placeholder={selectedType ? 'Model (optional)' : 'Choose an instrument first'}
+                className="w-full bg-gray-700 text-white px-3 py-2 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm placeholder-gray-500 disabled:opacity-40 disabled:cursor-not-allowed"
               />
               <button
                 type="submit"
-                disabled={!customInput.trim()}
-                className="bg-gray-600 hover:bg-gray-500 text-white font-bold px-3 py-2 rounded-lg transition text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={!selectedType}
+                className="w-full bg-gray-600 hover:bg-gray-500 text-white font-bold px-3 py-2 rounded-lg transition text-sm disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                +
+                Add Instrument
               </button>
             </form>
           </div>

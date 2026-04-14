@@ -1,0 +1,27 @@
+apiVersion: minio.min.io/v2
+kind: Tenant
+metadata:
+  name: jam-minio
+  namespace: jam-storage
+spec:
+  configuration:
+    name: jam-minio-env-configuration
+  mountPath: /export
+  requestAutoCert: false
+  exposeServices:
+    minio: true
+    console: true
+  pools:
+    - name: pool-0
+      servers: 1
+      volumesPerServer: 1
+      volumeClaimTemplate:
+        metadata:
+          name: data
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: minio-wffc
+          resources:
+            requests:
+              storage: 10Gi

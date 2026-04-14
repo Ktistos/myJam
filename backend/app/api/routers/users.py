@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_current_user_id
 from app.models.user import User, UserInstrument
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 
@@ -10,12 +11,16 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def create_user(body: UserCreate, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.id == body.id).first():
+def create_user(
+    body: UserCreate,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    if db.query(User).filter(User.id == current_user_id).first():
         raise HTTPException(status_code=409, detail="User already exists")
 
     user = User(
-        id=body.id,
+        id=current_user_id,
         name=body.name,
         bio=body.bio,
         recording_link=body.recording_link,
@@ -23,8 +28,14 @@ def create_user(body: UserCreate, db: Session = Depends(get_db)):
     )
     db.add(user)
     for inst in body.instruments:
-        db.add(UserInstrument(user_id=body.id, instrument=inst.instrument, skill_level=inst.skill_level))
-    db.commit()
+        db.add(UserInstrument(user_id=current_user_id, instrument=inst.instrument, skill_level=inst.skill_level))
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if db.query(User).filter(User.id == current_user_id).first():
+            raise HTTPException(status_code=409, detail="User already exists") from exc
+        raise
     db.refresh(user)
     return user
 

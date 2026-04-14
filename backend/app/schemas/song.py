@@ -1,11 +1,33 @@
 from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SongCreate(BaseModel):
     title: str
     artist: str = ""
+
+
+class SongImportRequest(BaseModel):
+    url: str
+
+
+class SongImportOut(BaseModel):
+    title: str
+    artist: str
+    service: str
+    original_url: str
+
+
+class SongImportTrackOut(BaseModel):
+    title: str
+    artist: str
+
+
+class SongPlaylistImportOut(BaseModel):
+    service: str
+    original_url: str
+    songs: list[SongImportTrackOut]
 
 
 class SongUpdate(BaseModel):
@@ -15,6 +37,8 @@ class SongUpdate(BaseModel):
 
 
 class SongOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     jam_id: UUID
     title: str
@@ -24,11 +48,10 @@ class SongOut(BaseModel):
     submitted_by_name: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class RoleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     song_id: UUID
     instrument: str
@@ -38,6 +61,3 @@ class RoleOut(BaseModel):
     joined_by_name: str | None
     pending_user: str | None
     pending_user_name: str | None
-
-    class Config:
-        from_attributes = True

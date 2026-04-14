@@ -7,6 +7,7 @@ const AdminPanel = ({
   songs,
   rolesBySongId,
   participants,
+  hardware,
   onAdvanceState,
   onUpdateSettings,
   onSetCurrentSong,
@@ -14,6 +15,8 @@ const AdminPanel = ({
   onRejectSong,
   onApproveRole,
   onRejectRole,
+  onApproveHardware,
+  onRejectHardware,
   onAddAdmin,
   onRemoveAdmin,
   onDeleteJam,
@@ -56,7 +59,9 @@ const AdminPanel = ({
       });
     });
 
-  const totalPending = pendingSongs.length + pendingRoles.length;
+  const pendingHardware = (hardware || []).filter((h) => h.status === 'pending');
+
+  const totalPending = pendingSongs.length + pendingRoles.length + pendingHardware.length;
 
   // Non-admin participants available for promotion
   const nonAdminParticipants = participants.filter((p) => !jam.admins.includes(p.userId));
@@ -137,6 +142,13 @@ const AdminPanel = ({
                   onChange={() => onUpdateSettings(jam.id, { requireSongApproval: !jam.settings.requireSongApproval })}
                 />
                 <span className="text-sm text-gray-200">Require admin approval for song submissions</span>
+              </label>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <Toggle
+                  value={jam.settings.requireHardwareApproval}
+                  onChange={() => onUpdateSettings(jam.id, { requireHardwareApproval: !jam.settings.requireHardwareApproval })}
+                />
+                <span className="text-sm text-gray-200">Require admin approval for hardware submissions</span>
               </label>
             </div>
           </section>
@@ -230,6 +242,21 @@ const AdminPanel = ({
                     <div className="flex gap-2 shrink-0">
                       <button onClick={() => onApproveRole(role.songId, role.id)} className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1 px-2.5 rounded transition">✓</button>
                       <button onClick={() => onRejectRole(role.songId, role.id)} className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1 px-2.5 rounded transition">✗</button>
+                    </div>
+                  </div>
+                ))}
+                {pendingHardware.map((hw) => (
+                  <div key={hw.id} className="flex items-center justify-between bg-gray-700 p-3 rounded-lg gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">Hardware submission</p>
+                      <p className="text-xs text-gray-400 truncate">
+                        <span className="text-gray-200">{hw.owner_name}</span> wants to bring{' '}
+                        <span className="text-gray-200">{hw.instrument}</span>
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button onClick={() => onApproveHardware(jam.id, hw.id)} className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1 px-2.5 rounded transition">✓</button>
+                      <button onClick={() => onRejectHardware(jam.id, hw.id)} className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1 px-2.5 rounded transition">✗</button>
                     </div>
                   </div>
                 ))}

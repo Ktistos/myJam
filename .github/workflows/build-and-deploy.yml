@@ -1,0 +1,130 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "front-end/**"
+      - "k8s/**"
+      - "scripts/**"
+      - ".env.example"
+      - "docker-compose.yaml"
+      - ".github/workflows/build-and-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy after publishing images
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-and-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_image: ${{ steps.images.outputs.backend_image }}
+      frontend_image: ${{ steps.images.outputs.frontend_image }}
+    env:
+      BACKEND_IMAGE_REPO: ${{ vars.BACKEND_IMAGE_REPO }}
+      FRONTEND_IMAGE_REPO: ${{ vars.FRONTEND_IMAGE_REPO }}
+      IMAGE_TAG: ${{ github.sha }}
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+      VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+      VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+      VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+      VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+      VITE_API_URL: ${{ vars.VITE_API_URL }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate image repo configuration
+        run: |
+          : "${BACKEND_IMAGE_REPO:?Set repository variable BACKEND_IMAGE_REPO}"
+          : "${FRONTEND_IMAGE_REPO:?Set repository variable FRONTEND_IMAGE_REPO}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push images
+        run: PUSH_IMAGES=1 bash scripts/build-images.sh all
+
+      - name: Capture image references
+        id: images
+        run: |
+          source .k8s-images.env
+          echo "backend_image=${BACKEND_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "frontend_image=${FRONTEND_IMAGE}" >> "${GITHUB_OUTPUT}"
+
+  deploy:
+    if: ${{ github.event_name == 'push' || github.event.inputs.deploy == 'true' }}
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      BACKEND_IMAGE: ${{ needs.build.outputs.backend_image }}
+      FRONTEND_IMAGE: ${{ needs.build.outputs.frontend_image }}
+      APP_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
+      STORAGE_NAMESPACE: ${{ vars.K8S_STORAGE_NAMESPACE }}
+      OPERATOR_NAMESPACE: ${{ vars.MINIO_OPERATOR_NAMESPACE }}
+      INGRESS_CLASS_NAME: ${{ vars.INGRESS_CLASS_NAME }}
+      INSTALL_MINIO_OPERATOR: ${{ vars.INSTALL_MINIO_OPERATOR }}
+      APPLY_MINIO_INGRESS: ${{ vars.APPLY_MINIO_INGRESS }}
+      MINIO_OPERATOR_REF: ${{ vars.MINIO_OPERATOR_REF }}
+      MINIO_STORAGE_CLASS_NAME: ${{ vars.MINIO_STORAGE_CLASS_NAME }}
+      MINIO_STORAGE_SIZE: ${{ vars.MINIO_STORAGE_SIZE }}
+      APP_HOST: ${{ vars.APP_HOST }}
+      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+      MINIO_API_HOST: ${{ vars.MINIO_API_HOST }}
+      MINIO_PUBLIC_URL: ${{ vars.MINIO_PUBLIC_URL }}
+      MINIO_CONSOLE_HOST: ${{ vars.MINIO_CONSOLE_HOST }}
+      MINIO_CONSOLE_REDIRECT_URL: ${{ vars.MINIO_CONSOLE_REDIRECT_URL }}
+      SPOTIFY_MARKET: ${{ vars.SPOTIFY_MARKET }}
+      IMAGE_PULL_SECRET_NAME: ${{ vars.IMAGE_PULL_SECRET_NAME }}
+      IMAGE_PULL_SERVER: ${{ vars.IMAGE_PULL_SERVER }}
+      IMAGE_PULL_EMAIL: ${{ vars.IMAGE_PULL_EMAIL }}
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+      SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+      IMAGE_PULL_USERNAME: ${{ secrets.IMAGE_PULL_USERNAME }}
+      IMAGE_PULL_PASSWORD: ${{ secrets.IMAGE_PULL_PASSWORD }}
+      KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate deploy configuration
+        run: |
+          : "${KUBECONFIG_B64:?Set secret KUBECONFIG_B64}"
+          : "${APP_HOST:?Set repository variable APP_HOST}"
+          : "${MINIO_API_HOST:?Set repository variable MINIO_API_HOST}"
+          : "${MINIO_CONSOLE_HOST:?Set repository variable MINIO_CONSOLE_HOST}"
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p "${HOME}/.kube"
+          echo "${KUBECONFIG_B64}" | base64 --decode > "${HOME}/.kube/config"
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Deploy app stack
+        run: bash scripts/deploy-cluster.sh

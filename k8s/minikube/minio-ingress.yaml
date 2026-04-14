@@ -1,0 +1,37 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jam-minio-api
+  namespace: jam-storage
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: minio.jam.127.0.0.1.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jam-minio-console
+  namespace: jam-storage
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: minio-console.jam.127.0.0.1.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio-console
+                port:
+                  number: 9090

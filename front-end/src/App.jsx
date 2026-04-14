@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 
 import Modal from './components/Modal';
 import Header from './components/Header';
@@ -143,6 +143,7 @@ function normalizeParticipant(p) {
 
 // Converts a backend-shaped JamOut to the frontend shape used throughout the app
 function normalizeJam(j) {
+  const inviteCode = j.invite_code ?? j.inviteCode ?? null;
   return {
     id: String(j.id),
     name: j.name,
@@ -155,22 +156,41 @@ function normalizeJam(j) {
     visibility: j.visibility,
     state:      j.state,
     admins:     j.admin_ids ?? j.admins ?? [],
-    invite_code: j.invite_code ?? null,
+    inviteCode,
+    invite_code: inviteCode,
     settings: {
       requireRoleApproval: j.require_role_approval ?? j.settings?.requireRoleApproval ?? false,
       requireSongApproval: j.require_song_approval ?? j.settings?.requireSongApproval ?? false,
+      requireHardwareApproval: j.require_hardware_approval ?? j.settings?.requireHardwareApproval ?? false,
     },
     currentSongId: j.current_song_id ?? j.currentSongId ?? null,
     created_by: j.created_by ?? null,
+    participantCount: j.participant_count ?? j.participantCount ?? null,
+    isParticipant: j.is_participant ?? j.isParticipant ?? false,
+  };
+}
+
+function normalizeSong(s) {
+  return {
+    id: String(s.id),
+    jamId: String(s.jam_id ?? s.jamId ?? ''),
+    title: s.title,
+    artist: s.artist ?? '',
+    status: s.status,
+    submittedBy: s.submitted_by ?? s.submittedBy ?? null,
+    submittedByName: s.submitted_by_name ?? s.submittedByName ?? '',
+    createdAt: s.created_at ?? s.createdAt ?? null,
   };
 }
 
 function normalizeRole(r) {
   return {
     id: String(r.id),
-    song_id: r.song_id,
+    songId: String(r.song_id ?? r.songId ?? ''),
+    song_id: String(r.song_id ?? r.songId ?? ''),
     instrument: r.instrument,
     ownerId: r.owner_id ?? r.ownerId ?? null,
+    ownerName: r.owner_name ?? r.ownerName ?? null,
     joinedByUserId: r.joined_by ?? r.joinedByUserId ?? null,
     joinedByUserName: r.joined_by_name ?? r.joinedByUserName ?? null,
     pendingUserId: r.pending_user ?? r.pendingUserId ?? null,
@@ -178,28 +198,58 @@ function normalizeRole(r) {
   };
 }
 
-function createRolesFromParticipants(songId, participants) {
-  return participants.flatMap((p) =>
-    (p.instrumentObjects || []).map((inst) => ({
-      id: uid(),
-      // Handle both { type } (Profile shape) and { name } (legacy mock shape)
-      instrument: inst.type ?? inst.name ?? String(inst),
-      ownerId: p.userId,
-      joinedByUserId: null,
-      pendingUserId: null,
-    }))
-  );
+export function createRolesFromParticipants(songId, participants) {
+  const roles = [{
+    id: uid(),
+    songId,
+    instrument: 'Vocals',
+    ownerId: null,
+    ownerName: null,
+    joinedByUserId: null,
+    joinedByUserName: null,
+    pendingUserId: null,
+    pendingUserName: null,
+  }];
+  const seenOwnedInstruments = new Set();
+
+  participants.forEach((p) => {
+    (p.instrumentObjects || []).forEach((inst) => {
+      const instrument = instrumentLabel(inst);
+      if (!instrument || instrument.toLowerCase() === 'vocals') return;
+
+      const key = `${p.userId}|${instrument.toLowerCase()}`;
+      if (seenOwnedInstruments.has(key)) return;
+      seenOwnedInstruments.add(key);
+
+      roles.push({
+        id: uid(),
+        songId,
+        instrument,
+        ownerId: p.userId,
+        ownerName: p.name,
+        joinedByUserId: null,
+        joinedByUserName: null,
+        pendingUserId: null,
+        pendingUserName: null,
+      });
+    });
+  });
+
+  return roles;
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   // Auth state: null = loading, false = guest, firebase user object = logged in
   const [firebaseUser,  setFirebaseUser]  = useState(undefined); // undefined = still loading
+  const [guestMode,     setGuestMode]     = useState(false);
+  const [userLocation,  setUserLocation]  = useState(null);
   const [userName,          setUserName]          = useState('');
   const [userInstruments,   setUserInstruments]   = useState([]);
   const [userBio,            setUserBio]            = useState('');
   const [userRecordingLink,  setUserRecordingLink]  = useState('');
   const [userAvatarUrl,      setUserAvatarUrl]      = useState(null);
+  const [spotifyStatus,      setSpotifyStatus]      = useState({ connected: false });
 
   const userId = firebaseUser?.uid ?? 'guest';
 
@@ -208,6 +258,11 @@ export default function App() {
     return onAuthStateChanged(auth, async (fbUser) => {
       setFirebaseUser(fbUser ?? null);
       if (fbUser) {
+        // Always set the Firebase display name immediately so the header never
+        // shows "Guest" or "My Profile" while the backend round-trip is in flight.
+        setUserName(fbUser.displayName ?? '');
+        setUserAvatarUrl(fbUser.photoURL ?? '');
+
         try {
           // Create user in DB on first login, fetch profile otherwise
           let profile;
@@ -215,7 +270,6 @@ export default function App() {
             profile = await api.getMe();
           } catch {
             profile = await api.createUser({
-              id: fbUser.uid,
               name: fbUser.displayName ?? 'Musician',
               avatar_url: fbUser.photoURL ?? '',
             });
@@ -226,15 +280,29 @@ export default function App() {
           setUserAvatarUrl(profile.avatar_url ?? '');
           setUserInstruments((profile.instruments || []).map(normalizeInstrument));
 
+          try {
+            setSpotifyStatus(await api.getSpotifyStatus());
+          } catch {
+            setSpotifyStatus({ connected: false });
+          }
+
           // Load public jams from backend
           const backendJams = await api.listJams();
           setJams(backendJams.map(normalizeJam));
         } catch {
-          // Backend not reachable — keep mock data
+          // Backend not reachable — Firebase name is already shown above
         }
+      } else {
+        setSpotifyStatus({ connected: false });
       }
     });
   }, []);
+
+  // Load public jams for guest users (no Firebase auth)
+  useEffect(() => {
+    if (!guestMode) return;
+    api.listJams().then((backendJams) => setJams(backendJams.map(normalizeJam))).catch(() => {});
+  }, [guestMode]);
 
   // Navigation
   const [currentView,    setCurrentView]    = useState('jamList');
@@ -245,57 +313,14 @@ export default function App() {
   const [jams,                setJams]                = useState([]);
   const [songsByJamId,        setSongsByJamId]        = useState({});
   const [rolesBySongId,       setRolesBySongId]       = useState({});
+  const [hardwareByJamId,     setHardwareByJamId]     = useState({});
   const [participantsByJamId, setParticipantsByJamId] = useState({});
+  const [inviteCodesByJamId,  setInviteCodesByJamId]  = useState({});
+  const selectedSongIdRef = useRef(selectedSongId);
 
-  // ── Real-time Events (SSE) ────────────────────────────────────────────────
   useEffect(() => {
-    if (!firebaseUser || !selectedJamId) return;
-
-    const eventSource = new EventSource(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/events/jam/${selectedJamId}`);
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log("Real-time event:", data);
-
-        if (data.type === 'jam_updated') {
-          setJams(prev => prev.map(j => j.id === data.jam.id ? normalizeJam(data.jam) : j));
-        } else if (data.type === 'song_added' || data.type === 'song_updated') {
-          // Re-fetch songs for the jam
-          api.listSongs(selectedJamId).then(songs => {
-            setSongsByJamId(prev => ({ ...prev, [selectedJamId]: songs.map(s => ({ ...s, id: String(s.id) })) }));
-          });
-        } else if (data.type === 'participant_joined' || data.type === 'participant_left') {
-          // Re-fetch participants
-          api.listParticipants(selectedJamId).then(parts => {
-            setParticipantsByJamId(prev => ({ ...prev, [selectedJamId]: parts.map(normalizeParticipant) }));
-          });
-        } else if (data.type === 'role_updated') {
-          // Re-fetch roles if a song is selected
-          if (selectedSongId) {
-            api.listRoles(selectedSongId).then(roles => {
-              setRolesBySongId(prev => ({ ...prev, [selectedSongId]: roles }));
-            });
-          }
-        }
-      } catch (e) {
-        console.error("Error parsing real-time event", e);
-      }
-    };
-
-    eventSource.onerror = (err) => {
-      console.error("EventSource failed:", err);
-      eventSource.close();
-    };
-
-    return () => eventSource.close();
-  }, [firebaseUser, selectedJamId, selectedSongId]);
-
-  // UI
-  const [modal,             setModal]             = useState(null);
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [joiningJamId,      setJoiningJamId]      = useState(null);
-  const [viewingParticipant, setViewingParticipant] = useState(null);
+    selectedSongIdRef.current = selectedSongId;
+  }, [selectedSongId]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const currentJam = useMemo(
@@ -323,21 +348,165 @@ export default function App() {
     [currentJam, userId]
   );
   const isCurrentJamParticipant = useMemo(
-    () => currentParticipants.some((p) => p.userId === userId),
-    [currentParticipants, userId]
+    () => !!currentJam?.isParticipant || currentParticipants.some((p) => p.userId === userId),
+    [currentJam, currentParticipants, userId]
   );
 
+  // ── Real-time Events (SSE) ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!firebaseUser || !selectedJamId || (!isCurrentJamAdmin && !isCurrentJamParticipant)) return;
+    let closed = false;
+    let eventSource;
+
+    (async () => {
+      try {
+        const eventAuth = await api.createJamEventToken(selectedJamId);
+        if (closed) return;
+
+        const params = new URLSearchParams();
+        if (eventAuth?.token) params.set('token', eventAuth.token);
+        const base = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+        const url = `${base}/events/jam/${selectedJamId}${params.toString() ? `?${params.toString()}` : ''}`;
+
+        eventSource = new EventSource(url);
+        if (closed) {
+          eventSource.close();
+          return;
+        }
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'jam_updated') {
+              api.getJam(selectedJamId).then((jam) => {
+                setJams((prev) => prev.map((j) => j.id === selectedJamId ? normalizeJam(jam) : j));
+              }).catch(() => {});
+            } else if (data.type === 'jam_deleted') {
+              setJams((prev) => prev.filter((j) => j.id !== selectedJamId));
+              setParticipantsByJamId((prev) => {
+                const next = { ...prev };
+                delete next[selectedJamId];
+                return next;
+              });
+              setSongsByJamId((prev) => {
+                const next = { ...prev };
+                delete next[selectedJamId];
+                return next;
+              });
+              setSelectedSongId(null);
+              setSelectedJamId(null);
+              setCurrentView('jamList');
+            } else if (['song_added', 'song_updated', 'song_deleted'].includes(data.type)) {
+              api.listSongs(selectedJamId).then((songs) => {
+                setSongsByJamId((prev) => ({ ...prev, [selectedJamId]: songs.map(normalizeSong) }));
+              }).catch(() => {});
+            } else if (data.type === 'participant_joined' || data.type === 'participant_left') {
+              api.listParticipants(selectedJamId).then((parts) => {
+                const normalizedParts = parts.map(normalizeParticipant);
+                setParticipantsByJamId((prev) => ({ ...prev, [selectedJamId]: normalizedParts }));
+                setJams((prev) => prev.map((j) =>
+                  j.id === selectedJamId
+                    ? {
+                        ...j,
+                        participantCount: normalizedParts.length,
+                        isParticipant: normalizedParts.some((p) => p.userId === userId),
+                      }
+                    : j
+                ));
+              }).catch(() => {});
+            } else if (data.type === 'hardware_updated' || data.type === 'hardware_pending') {
+              api.listHardware(selectedJamId).then((hw) => {
+                setHardwareByJamId((prev) => ({ ...prev, [selectedJamId]: hw }));
+              }).catch(() => {});
+            } else if (data.type === 'role_updated' && selectedSongIdRef.current) {
+              const activeSongId = selectedSongIdRef.current;
+              api.listRoles(activeSongId).then((roles) => {
+                setRolesBySongId((prev) => ({ ...prev, [activeSongId]: roles.map(normalizeRole) }));
+              }).catch(() => {});
+            }
+          } catch (e) {
+            console.error('Error parsing real-time event', e);
+          }
+        };
+
+        eventSource.onerror = (err) => {
+          console.error('EventSource failed:', err);
+          eventSource.close();
+        };
+      } catch (e) {
+        console.error('Could not open event stream', e);
+      }
+    })();
+
+    return () => {
+      closed = true;
+      eventSource?.close();
+    };
+  }, [firebaseUser, selectedJamId, userId, isCurrentJamAdmin, isCurrentJamParticipant]);
+
+  // UI
+  const [modal,             setModal]             = useState(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [joiningJamId,      setJoiningJamId]      = useState(null);
+  const [viewingParticipant, setViewingParticipant] = useState(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const spotifyResult = params.get('spotify');
+    if (!spotifyResult) return;
+
+    if (spotifyResult === 'connected') {
+      setModal({ title: 'Spotify Connected', message: 'Spotify playlist import is now connected.' });
+      if (firebaseUser) {
+        api.getSpotifyStatus()
+          .then(setSpotifyStatus)
+          .catch(() => setSpotifyStatus({ connected: false }));
+      }
+    } else {
+      setModal({ title: 'Spotify Error', message: 'Could not connect Spotify. Check the app redirect URI and try again.' });
+    }
+
+    params.delete('spotify');
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+    window.history.replaceState({}, '', nextUrl);
+  }, [firebaseUser]);
+
   // ── Profile ────────────────────────────────────────────────────────────────
-  const handleUpdateProfile = async ({ name: newName, instruments: newInstruments, bio, recordingLink, avatarUrl }) => {
+  const handleConnectSpotify = async () => {
+    try {
+      const { url } = await api.createSpotifyLoginUrl();
+      window.location.assign(url);
+    } catch (e) {
+      setModal({ title: 'Error', message: `Could not start Spotify login: ${e.message}` });
+    }
+  };
+
+  const handleDisconnectSpotify = async () => {
+    try {
+      const status = await api.disconnectSpotify();
+      setSpotifyStatus(status ?? { connected: false });
+      setModal({ title: 'Spotify Disconnected', message: 'Spotify playlist import was disconnected.' });
+    } catch (e) {
+      setModal({ title: 'Error', message: `Could not disconnect Spotify: ${e.message}` });
+    }
+  };
+
+  const handleUpdateProfile = async ({ name: newName, instruments: newInstruments, bio, recordingLink, avatarUrl, avatarFile }) => {
     if (!newName) return;
+    let savedAvatarUrl = avatarUrl;
 
     if (firebaseUser) {
       try {
+        if (avatarFile) {
+          const upload = await api.uploadAvatar(avatarFile);
+          savedAvatarUrl = upload.url;
+        }
         await api.updateMe({
           name: newName,
           bio,
           recording_link: recordingLink,
-          avatar_url: avatarUrl,
+          avatar_url: savedAvatarUrl ?? '',
           // Convert Profile shape { type, model, skill } → backend shape { instrument, skill_level }
           instruments: newInstruments.map((inst) => ({
             instrument: inst.model
@@ -356,14 +525,14 @@ export default function App() {
     setUserInstruments(newInstruments);
     setUserBio(bio);
     setUserRecordingLink(recordingLink);
-    setUserAvatarUrl(avatarUrl);
+    setUserAvatarUrl(savedAvatarUrl);
     // Sync participant record in all jams
     setParticipantsByJamId((prev) => {
       const updated = {};
       for (const [jamId, participants] of Object.entries(prev)) {
         updated[jamId] = participants.map((p) =>
           p.userId === userId
-            ? { ...p, name: newName, bio, recordingLink, avatarUrl, instrumentObjects: newInstruments }
+            ? { ...p, name: newName, bio, recordingLink, avatarUrl: savedAvatarUrl, instrumentObjects: newInstruments }
             : p
         );
       }
@@ -402,10 +571,13 @@ export default function App() {
         visibility,
         state: 'initial',
         admins: [userId],
-        invite_code: visibility === 'private' ? Math.random().toString(36).substring(2, 8).toUpperCase() : null,
+        inviteCode: visibility === 'private' ? Math.random().toString(36).substring(2, 8).toUpperCase() : null,
         settings: { requireRoleApproval: false, requireSongApproval: false },
         currentSongId: null,
+        participantCount: 1,
+        isParticipant: true,
       };
+      newJam.invite_code = newJam.inviteCode;
     }
 
     setJams((prev) => [...prev, newJam]);
@@ -422,7 +594,7 @@ export default function App() {
     }));
     setSongsByJamId((prev) => ({ ...prev, [newJam.id]: [] }));
     const msg = visibility === 'private'
-      ? `Private jam created! Invite code: ${newJam.invite_code}`
+      ? `Private jam created! Invite code: ${newJam.inviteCode}`
       : 'Jam created!';
     setModal({ title: 'Success', message: msg });
     setCurrentView('jamList');
@@ -451,6 +623,7 @@ export default function App() {
         const backendPatch = {};
         if (patch.requireRoleApproval !== undefined) backendPatch.require_role_approval = patch.requireRoleApproval;
         if (patch.requireSongApproval !== undefined) backendPatch.require_song_approval = patch.requireSongApproval;
+        if (patch.requireHardwareApproval !== undefined) backendPatch.require_hardware_approval = patch.requireHardwareApproval;
         
         const backendJam = await api.updateJam(jamId, backendPatch);
         const jam = normalizeJam(backendJam);
@@ -463,6 +636,32 @@ export default function App() {
         prev.map((j) => j.id === jamId ? { ...j, settings: { ...j.settings, ...patch } } : j)
       );
     }
+  };
+
+  const handleRegenerateInviteCode = async (jamId) => {
+    if (firebaseUser) {
+      try {
+        const backendJam = await api.regenerateInviteCode(jamId);
+        const jam = normalizeJam(backendJam);
+        setJams((prev) => prev.map((j) => (j.id === jamId ? jam : j)));
+        if (jam.inviteCode) {
+          setInviteCodesByJamId((prev) => ({ ...prev, [jamId]: jam.inviteCode }));
+        }
+        setModal({ title: 'Invite Code Updated', message: `New invite code: ${jam.inviteCode}` });
+      } catch (e) {
+        setModal({ title: 'Error', message: `Could not regenerate invite code: ${e.message}` });
+      }
+      return;
+    }
+
+    const nextCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    setJams((prev) =>
+      prev.map((j) =>
+        j.id === jamId ? { ...j, inviteCode: nextCode, invite_code: nextCode } : j
+      )
+    );
+    setInviteCodesByJamId((prev) => ({ ...prev, [jamId]: nextCode }));
+    setModal({ title: 'Invite Code Updated', message: `New invite code: ${nextCode}` });
   };
 
   // ── Current Song ───────────────────────────────────────────────────────────
@@ -480,54 +679,158 @@ export default function App() {
     }
   };
 
+  const removeJamFromLocalState = (jamId) => {
+    const jamSongs = songsByJamId[jamId] || [];
+
+    setParticipantsByJamId((prev) => {
+      const next = { ...prev };
+      delete next[jamId];
+      return next;
+    });
+    setSongsByJamId((prev) => {
+      const next = { ...prev };
+      delete next[jamId];
+      return next;
+    });
+    setRolesBySongId((prev) => {
+      const next = { ...prev };
+      jamSongs.forEach((song) => {
+        delete next[song.id];
+      });
+      return next;
+    });
+    setHardwareByJamId((prev) => {
+      const next = { ...prev };
+      delete next[jamId];
+      return next;
+    });
+    setInviteCodesByJamId((prev) => {
+      const next = { ...prev };
+      delete next[jamId];
+      return next;
+    });
+    setJams((prev) => prev.filter((j) => j.id !== jamId));
+  };
+
+  const reconcileJamFromBackend = async (jamId) => {
+    const [backendJam, parts, hardware] = await Promise.all([
+      api.getJam(jamId),
+      api.listParticipants(jamId),
+      api.listHardware(jamId),
+    ]);
+    const normalizedParts = parts.map(normalizeParticipant);
+    const refreshedJam = {
+      ...normalizeJam(backendJam),
+      participantCount: normalizedParts.length,
+      isParticipant: normalizedParts.some((p) => p.userId === userId),
+    };
+
+    setParticipantsByJamId((prev) => ({ ...prev, [jamId]: normalizedParts }));
+    setHardwareByJamId((prev) => ({ ...prev, [jamId]: hardware }));
+    setJams((prev) =>
+      prev.some((j) => j.id === jamId)
+        ? prev.map((j) => (j.id === jamId ? refreshedJam : j))
+        : [...prev, refreshedJam]
+    );
+
+    return refreshedJam;
+  };
+
+  const refreshRolesForSong = async (songId) => {
+    const roles = await api.listRoles(songId);
+    setRolesBySongId((prev) => ({ ...prev, [songId]: roles.map(normalizeRole) }));
+    return roles;
+  };
+
   // ── Join Jam ───────────────────────────────────────────────────────────────
   const handleJoinJam = (jamId) => {
+    if (!firebaseUser) return;
     setJoiningJamId(jamId);
   };
 
   const handleConfirmJoin = async (jamId, selectedInstruments) => {
     if (firebaseUser) {
+      let alreadyJoinedElsewhere = false;
+      let hardwareError = null;
       try {
-        await api.joinJam(jamId);
-        
+        await api.joinJam(jamId, inviteCodesByJamId[jamId]);
+
         // Add each instrument to the hardware set
         for (const inst of selectedInstruments) {
-          await api.addHardware(jamId, inst);
+          try {
+            await api.submitHardware(jamId, inst);
+          } catch (e) {
+            hardwareError = e;
+            break;
+          }
         }
-
-        const parts = await api.listParticipants(jamId);
-        setParticipantsByJamId((prev) => ({
-          ...prev,
-          [jamId]: parts.map(normalizeParticipant),
-        }));
-        
-        // Update jam locally to show new hardware
-        const updatedJam = await api.getJam(jamId);
-        setJams(prev => prev.map(j => j.id === jamId ? normalizeJam(updatedJam) : j));
-
       } catch (e) {
-        setModal({ title: 'Error', message: `Could not join jam: ${e.message}` });
+        if (e.status === 409) {
+          alreadyJoinedElsewhere = true;
+        } else {
+          setModal({ title: 'Error', message: `Could not join jam: ${e.message}` });
+          setJoiningJamId(null);
+          return;
+        }
+      }
+
+      try {
+        await reconcileJamFromBackend(jamId);
+        setInviteCodesByJamId((prev) => {
+          const next = { ...prev };
+          delete next[jamId];
+          return next;
+        });
+      } catch (refreshError) {
+        setModal({ title: 'Error', message: `Could not refresh jam: ${refreshError.message}` });
         setJoiningJamId(null);
         return;
       }
-    } else {
-      // Guest fallback (unchanged for now or simplified)
-      setParticipantsByJamId((prev) => {
-        const existing = prev[jamId] || [];
-        if (existing.some((p) => p.userId === userId)) return prev;
-        return {
-          ...prev,
-          [jamId]: [...existing, {
-            userId,
-            name: userName,
-            bio: userBio,
-            recordingLink: userRecordingLink,
-            avatarUrl: userAvatarUrl,
-            instrumentObjects: userInstruments,
-          }],
-        };
+
+      setJoiningJamId(null);
+      if (hardwareError) {
+        setModal({
+          title: 'Joined, but Incomplete',
+          message: `You joined the jam, but your instruments could not be added: ${hardwareError.message}`,
+        });
+        return;
+      }
+      setModal({
+        title: alreadyJoinedElsewhere ? 'Already Joined' : 'Joined!',
+        message: alreadyJoinedElsewhere
+          ? 'This account had already joined the jam from another browser.'
+          : 'You are now a participant.',
       });
+      return;
     }
+
+    // Guest fallback (unchanged for now or simplified)
+    setParticipantsByJamId((prev) => {
+      const existing = prev[jamId] || [];
+      if (existing.some((p) => p.userId === userId)) return prev;
+      return {
+        ...prev,
+        [jamId]: [...existing, {
+          userId,
+          name: userName,
+          bio: userBio,
+          recordingLink: userRecordingLink,
+          avatarUrl: userAvatarUrl,
+          instrumentObjects: userInstruments,
+        }],
+      };
+    });
+    setJams((prev) =>
+      prev.map((j) =>
+        j.id === jamId
+          ? {
+              ...j,
+              isParticipant: true,
+              participantCount: (j.participantCount ?? 0) + 1,
+            }
+          : j
+      )
+    );
     setJoiningJamId(null);
     setModal({ title: 'Joined!', message: 'You are now a participant.' });
   };
@@ -535,11 +838,13 @@ export default function App() {
   // ── Join by Invite Code ────────────────────────────────────────────────────
   const handleJoinByInviteCode = async (code) => {
     try {
-      const backendJam = await api.getJamByCode(code.trim().toUpperCase());
+      const normalizedCode = code.trim().toUpperCase();
+      const backendJam = await api.getJamByCode(normalizedCode);
       const jam = normalizeJam(backendJam);
       
       // Add to local list if not there
       setJams(prev => prev.some(j => j.id === jam.id) ? prev : [...prev, jam]);
+      setInviteCodesByJamId((prev) => ({ ...prev, [jam.id]: normalizedCode }));
       
       handleJoinJam(jam.id);
     } catch (e) {
@@ -563,32 +868,136 @@ export default function App() {
 
   // ── Leave Jam ──────────────────────────────────────────────────────────────
   const handleLeaveJam = async (jamId) => {
+    const jam = jams.find((j) => j.id === jamId);
+    const isLastAdmin = !!jam?.admins.includes(userId) && jam.admins.length === 1;
+    let result = { detail: 'Left', deleted_jam: false };
+
     if (firebaseUser) {
       try {
-        await api.leaveJam(jamId);
+        result = await api.leaveJam(jamId);
       } catch (e) {
+        if (e.status === 404) {
+          try {
+            await reconcileJamFromBackend(jamId);
+          } catch (refreshError) {
+            if (refreshError.status === 403 || refreshError.status === 404) {
+              removeJamFromLocalState(jamId);
+            } else {
+              setModal({ title: 'Error', message: `Could not refresh jam: ${refreshError.message}` });
+              return;
+            }
+          }
+          goHome();
+          return;
+        }
         setModal({ title: 'Error', message: `Could not leave: ${e.message}` });
         return;
       }
+    } else if (isLastAdmin) {
+      result = { detail: 'Jam deleted', deleted_jam: true };
     }
+
+    if (result.deleted_jam) {
+      removeJamFromLocalState(jamId);
+      setModal({ title: 'Jam Deleted', message: 'The last admin left the jam, so the jam was deleted.' });
+      goHome();
+      return;
+    }
+
+    if (firebaseUser) {
+      try {
+        await reconcileJamFromBackend(jamId);
+      } catch (e) {
+        if (e.status === 403 || e.status === 404) {
+          removeJamFromLocalState(jamId);
+        } else {
+          setModal({ title: 'Error', message: `Could not refresh jam: ${e.message}` });
+          return;
+        }
+      }
+      goHome();
+      return;
+    }
+
     setParticipantsByJamId((prev) => ({
       ...prev,
       [jamId]: (prev[jamId] || []).filter((p) => p.userId !== userId),
     }));
+    setJams((prev) => prev.flatMap((j) => {
+      if (j.id !== jamId) return [j];
+      const loadedCount = (participantsByJamId[jamId] || []).length;
+      const nextCount = Math.max(0, loadedCount > 0 ? loadedCount - 1 : (j.participantCount ?? 1) - 1);
+      if (j.visibility === 'private') return [];
+      return [{
+        ...j,
+        admins: j.admins.filter((adminId) => adminId !== userId),
+        isParticipant: false,
+        participantCount: nextCount,
+      }];
+    }));
     goHome();
   };
 
-  const handleAddHardware = async (jamId, instrument) => {
+  const refreshHardware = async (jamId) => {
+    const hw = await api.listHardware(jamId);
+    setHardwareByJamId((prev) => ({ ...prev, [jamId]: hw }));
+  };
+
+  const handleSubmitHardware = async (jamId, instrument) => {
     try {
-      const backendJam = await api.addHardware(jamId, instrument);
-      setJams(prev => prev.map(j => j.id === jamId ? normalizeJam(backendJam) : j));
-      // Re-fetch roles for the current song if any, since new roles were created in backend
+      await api.submitHardware(jamId, instrument);
+      await refreshHardware(jamId);
+      // Re-fetch roles for the current song if any, since new roles may have been created
       if (selectedSongId) {
         const roles = await api.listRoles(selectedSongId);
-        setRolesBySongId(prev => ({ ...prev, [selectedSongId]: roles }));
+        setRolesBySongId((prev) => ({ ...prev, [selectedSongId]: roles.map(normalizeRole) }));
       }
     } catch (e) {
       setModal({ title: 'Error', message: `Could not add hardware: ${e.message}` });
+    }
+  };
+
+  const handleUpdateHardware = async (jamId, hardwareId, instrument) => {
+    try {
+      await api.updateHardware(jamId, hardwareId, { instrument });
+      await refreshHardware(jamId);
+      if (selectedSongId) {
+        const roles = await api.listRoles(selectedSongId);
+        setRolesBySongId((prev) => ({ ...prev, [selectedSongId]: roles.map(normalizeRole) }));
+      }
+    } catch (e) {
+      setModal({ title: 'Error', message: `Could not update hardware: ${e.message}` });
+    }
+  };
+
+  const handleRemoveHardware = async (jamId, hardwareId) => {
+    try {
+      await api.removeHardware(jamId, hardwareId);
+      await refreshHardware(jamId);
+      if (selectedSongId) {
+        const roles = await api.listRoles(selectedSongId);
+        setRolesBySongId((prev) => ({ ...prev, [selectedSongId]: roles.map(normalizeRole) }));
+      }
+    } catch (e) {
+      setModal({ title: 'Error', message: `Could not remove hardware: ${e.message}` });
+    }
+  };
+
+  const handleApproveHardware = async (jamId, hardwareId) => {
+    try {
+      await api.approveHardware(jamId, hardwareId);
+      await refreshHardware(jamId);
+    } catch (e) {
+      setModal({ title: 'Error', message: `Could not approve hardware: ${e.message}` });
+    }
+  };
+
+  const handleRejectHardware = async (jamId, hardwareId) => {
+    try {
+      await api.rejectHardware(jamId, hardwareId);
+      await refreshHardware(jamId);
+    } catch (e) {
+      setModal({ title: 'Error', message: `Could not reject hardware: ${e.message}` });
     }
   };
 
@@ -596,8 +1005,8 @@ export default function App() {
   const handleAddAdmin = async (jamId, targetUserId) => {
     if (firebaseUser) {
       try {
-        const backendJam = await api.addAdmin(jamId, targetUserId);
-        const jam = normalizeJam(backendJam);
+        await api.addAdmin(jamId, targetUserId);
+        const jam = normalizeJam(await api.getJam(jamId));
         setJams((prev) => prev.map((j) => j.id === jamId ? jam : j));
       } catch (e) {
         setModal({ title: 'Error', message: `Could not add admin: ${e.message}` });
@@ -617,8 +1026,8 @@ export default function App() {
   const handleRemoveAdmin = async (jamId, adminId) => {
     if (firebaseUser) {
       try {
-        const backendJam = await api.removeAdmin(jamId, adminId);
-        const jam = normalizeJam(backendJam);
+        await api.removeAdmin(jamId, adminId);
+        const jam = normalizeJam(await api.getJam(jamId));
         setJams((prev) => prev.map((j) => j.id === jamId ? jam : j));
       } catch (e) {
         setModal({ title: 'Error', message: `Could not remove admin: ${e.message}` });
@@ -642,8 +1051,7 @@ export default function App() {
 
     if (firebaseUser) {
       try {
-        const backendSong = await api.submitSong(selectedJamId, { title, artist });
-        const newSong = { ...backendSong, id: String(backendSong.id) };
+        const newSong = normalizeSong(await api.submitSong(selectedJamId, { title, artist }));
         setSongsByJamId((prev) => ({
           ...prev,
           [selectedJamId]: [...(prev[selectedJamId] || []), newSong],
@@ -653,7 +1061,14 @@ export default function App() {
         return;
       }
     } else {
-      const newSong = { id: uid(), title, artist, status: needsApproval ? 'pending' : 'approved', submittedBy: userId };
+      const newSong = {
+        id: uid(),
+        title,
+        artist,
+        status: needsApproval ? 'pending' : 'approved',
+        submittedBy: userId,
+        submittedByName: userName,
+      };
       const participants = participantsByJamId[selectedJamId] || [];
       const newRoles = createRolesFromParticipants(newSong.id, participants);
       setSongsByJamId((prev) => ({
@@ -670,15 +1085,77 @@ export default function App() {
     setIsImportModalOpen(false);
   };
 
+  const handleImportSongs = async (songs) => {
+    if (!selectedJamId || songs.length === 0) return;
+    const jam = jams.find((j) => j.id === selectedJamId);
+    const needsApproval = jam?.settings?.requireSongApproval;
+
+    if (firebaseUser) {
+      const importedSongs = [];
+      try {
+        for (const song of songs) {
+          const newSong = normalizeSong(
+            await api.submitSong(selectedJamId, { title: song.title, artist: song.artist }),
+          );
+          importedSongs.push(newSong);
+        }
+      } catch (e) {
+        if (importedSongs.length > 0) {
+          setSongsByJamId((prev) => ({
+            ...prev,
+            [selectedJamId]: [...(prev[selectedJamId] || []), ...importedSongs],
+          }));
+        }
+        setModal({
+          title: 'Import Incomplete',
+          message: `${importedSongs.length}/${songs.length} songs imported. Last error: ${e.message}`,
+        });
+        return;
+      }
+
+      setSongsByJamId((prev) => ({
+        ...prev,
+        [selectedJamId]: [...(prev[selectedJamId] || []), ...importedSongs],
+      }));
+    } else {
+      const participants = participantsByJamId[selectedJamId] || [];
+      const importedSongs = songs.map((song) => ({
+        id: uid(),
+        title: song.title,
+        artist: song.artist,
+        status: needsApproval ? 'pending' : 'approved',
+        submittedBy: userId,
+        submittedByName: userName,
+      }));
+      const importedRoles = {};
+      importedSongs.forEach((song) => {
+        importedRoles[song.id] = createRolesFromParticipants(song.id, participants);
+      });
+
+      setSongsByJamId((prev) => ({
+        ...prev,
+        [selectedJamId]: [...(prev[selectedJamId] || []), ...importedSongs],
+      }));
+      setRolesBySongId((prev) => ({ ...prev, ...importedRoles }));
+    }
+
+    setModal({
+      title: needsApproval ? 'Submitted' : 'Imported',
+      message: needsApproval
+        ? `${songs.length} songs submitted — waiting for admin approval.`
+        : `${songs.length} songs imported to the setlist.`,
+    });
+    setIsImportModalOpen(false);
+  };
+
   // ── Approve / Reject Song ──────────────────────────────────────────────────
   const handleApproveSong = async (jamId, songId) => {
     if (firebaseUser) {
       try {
-        await api.updateSong(songId, { status: 'approved' });
-        // Local update for responsiveness
+        const updatedSong = normalizeSong(await api.updateSong(songId, { status: 'approved' }));
         setSongsByJamId((prev) => ({
           ...prev,
-          [jamId]: (prev[jamId] || []).map((s) => s.id === songId ? { ...s, status: 'approved' } : s),
+          [jamId]: (prev[jamId] || []).map((s) => s.id === songId ? updatedSong : s),
         }));
       } catch (e) {
         setModal({ title: 'Error', message: `Could not approve song: ${e.message}` });
@@ -704,6 +1181,9 @@ export default function App() {
       ...prev,
       [jamId]: (prev[jamId] || []).filter((s) => s.id !== songId),
     }));
+    setJams((prev) => prev.map((j) =>
+      j.id === jamId && j.currentSongId === songId ? { ...j, currentSongId: null } : j
+    ));
   };
 
   // ── Delete / Edit Song ─────────────────────────────────────────────────────
@@ -720,16 +1200,19 @@ export default function App() {
       ...prev,
       [jamId]: (prev[jamId] || []).filter((s) => s.id !== songId),
     }));
+    setJams((prev) => prev.map((j) =>
+      j.id === jamId && j.currentSongId === songId ? { ...j, currentSongId: null } : j
+    ));
   };
 
   const handleEditSong = async (jamId, songId, newTitle, newArtist) => {
     if (firebaseUser) {
       try {
-        await api.updateSong(songId, { title: newTitle, artist: newArtist });
+        const updatedSong = normalizeSong(await api.updateSong(songId, { title: newTitle, artist: newArtist }));
         setSongsByJamId((prev) => ({
           ...prev,
           [jamId]: (prev[jamId] || []).map((s) =>
-            s.id === songId ? { ...s, title: newTitle, artist: newArtist } : s
+            s.id === songId ? updatedSong : s
           ),
         }));
       } catch (e) {
@@ -752,9 +1235,15 @@ export default function App() {
     if (firebaseUser) {
       try {
         await api.claimRole(roleId);
-        const roles = await api.listRoles(selectedSongId);
-        setRolesBySongId((prev) => ({ ...prev, [selectedSongId]: roles }));
+        await refreshRolesForSong(selectedSongId);
       } catch (e) {
+        if (e.status === 409) {
+          try {
+            await refreshRolesForSong(selectedSongId);
+          } catch {}
+          setModal({ title: 'Already Updated', message: 'This role changed in another browser.' });
+          return;
+        }
         setModal({ title: 'Error', message: `Could not claim role: ${e.message}` });
       }
     } else {
@@ -777,9 +1266,15 @@ export default function App() {
     if (firebaseUser) {
       try {
         await api.leaveRole(roleId);
-        const roles = await api.listRoles(selectedSongId);
-        setRolesBySongId((prev) => ({ ...prev, [selectedSongId]: roles }));
+        await refreshRolesForSong(selectedSongId);
       } catch (e) {
+        if (e.status === 409) {
+          try {
+            await refreshRolesForSong(selectedSongId);
+          } catch {}
+          setModal({ title: 'Already Updated', message: 'This role changed in another browser.' });
+          return;
+        }
         setModal({ title: 'Error', message: `Could not leave role: ${e.message}` });
       }
     } else {
@@ -797,9 +1292,15 @@ export default function App() {
     if (firebaseUser) {
       try {
         await api.approveRole(roleId);
-        const roles = await api.listRoles(songId);
-        setRolesBySongId((prev) => ({ ...prev, [songId]: roles }));
+        await refreshRolesForSong(songId);
       } catch (e) {
+        if (e.status === 409) {
+          try {
+            await refreshRolesForSong(songId);
+          } catch {}
+          setModal({ title: 'Already Updated', message: 'This role was already reviewed in another browser.' });
+          return;
+        }
         setModal({ title: 'Error', message: `Could not approve: ${e.message}` });
       }
     } else {
@@ -816,9 +1317,15 @@ export default function App() {
     if (firebaseUser) {
       try {
         await api.rejectRole(roleId);
-        const roles = await api.listRoles(songId);
-        setRolesBySongId((prev) => ({ ...prev, [songId]: roles }));
+        await refreshRolesForSong(songId);
       } catch (e) {
+        if (e.status === 409) {
+          try {
+            await refreshRolesForSong(songId);
+          } catch {}
+          setModal({ title: 'Already Updated', message: 'This role was already reviewed in another browser.' });
+          return;
+        }
         setModal({ title: 'Error', message: `Could not reject: ${e.message}` });
       }
     } else {
@@ -838,20 +1345,77 @@ export default function App() {
     setSelectedJamId(jamId);
     setSelectedSongId(null);
     setCurrentView('jamDetail');
-    // Fetch participants from backend if we don't have them locally yet
-    if (firebaseUser && !participantsByJamId[jamId]) {
-      try {
-        const backendParticipants = await api.listParticipants(jamId);
-        setParticipantsByJamId((prev) => ({
-          ...prev,
-          [jamId]: backendParticipants.map(normalizeParticipant),
-        }));
-      } catch {
-        // ignore — will show empty list
+    // Fetch participants and songs from backend if not already loaded.
+    // Also prefetch role lists for visible songs so admin pending-role requests
+    // are available as soon as the jam detail view opens.
+    let songs = songsByJamId[jamId];
+
+    const fetches = [];
+    if (!participantsByJamId[jamId]) {
+      fetches.push(
+        api.listParticipants(jamId)
+          .then((parts) => {
+            const normalizedParts = parts.map(normalizeParticipant);
+            setParticipantsByJamId((prev) => ({ ...prev, [jamId]: normalizedParts }));
+            setJams((prev) => prev.map((j) =>
+              j.id === jamId
+                ? {
+                    ...j,
+                    participantCount: normalizedParts.length,
+                    isParticipant: normalizedParts.some((p) => p.userId === userId),
+                  }
+                : j
+            ));
+          })
+          .catch(() => {})
+      );
+    }
+    if (!songs) {
+      fetches.push(
+        api.listSongs(jamId)
+          .then((backendSongs) => {
+            songs = backendSongs.map(normalizeSong);
+            setSongsByJamId((prev) => ({ ...prev, [jamId]: songs }));
+          })
+          .catch(() => {})
+      );
+    }
+    if (!hardwareByJamId[jamId]) {
+      fetches.push(
+        api.listHardware(jamId)
+          .then((hw) => setHardwareByJamId((prev) => ({ ...prev, [jamId]: hw })))
+          .catch(() => {})
+      );
+    }
+    await Promise.all(fetches);
+
+    const songsToPrefetch = (songs || []).filter((song) => rolesBySongId[song.id] === undefined);
+    if (songsToPrefetch.length) {
+      const roleEntries = await Promise.all(
+        songsToPrefetch.map(async (song) => {
+          try {
+            const roles = await api.listRoles(song.id);
+            return [song.id, roles.map(normalizeRole)];
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const nextRoles = Object.fromEntries(roleEntries.filter(Boolean));
+      if (Object.keys(nextRoles).length > 0) {
+        setRolesBySongId((prev) => ({ ...prev, ...nextRoles }));
       }
     }
   };
-  const handleNavSong      = (songId) => { setSelectedSongId(songId); setCurrentView('songDetail'); };
+  const handleNavSong      = async (songId) => {
+    setSelectedSongId(songId);
+    setCurrentView('songDetail');
+    try {
+      const roles = await api.listRoles(songId);
+      setRolesBySongId((prev) => ({ ...prev, [songId]: roles.map(normalizeRole) }));
+    } catch {}
+  };
   const handleNavBackToJam = () => { setSelectedSongId(null); setCurrentView('jamDetail'); };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -865,9 +1429,11 @@ export default function App() {
     );
   }
 
-  if (!firebaseUser) {
-    return <Login />;
+  if (!firebaseUser && !guestMode) {
+    return <Login onGuest={() => setGuestMode(true)} />;
   }
+
+  const isGuest = !firebaseUser;
 
   const renderView = () => {
     switch (currentView) {
@@ -877,8 +1443,12 @@ export default function App() {
             jams={jams}
             onJamClick={handleNavJam}
             onNavCreate={() => setCurrentView('createJam')}
-            userId={userId}
+            userLocation={userLocation}
+            onRequestLocation={() => import('./utils/geo').then(m => m.getUserLocation()).then(setUserLocation).catch(() => {})}
             participantsByJamId={participantsByJamId}
+            currentUserId={userId}
+            onJoinByInviteCode={handleJoinByInviteCode}
+            isGuest={isGuest}
           />
         );
 
@@ -896,12 +1466,14 @@ export default function App() {
             onOpenImportModal={() => setIsImportModalOpen(true)}
             isAdmin={isCurrentJamAdmin}
             isParticipant={isCurrentJamParticipant}
+            isGuest={isGuest}
             onJoinJam={handleJoinJam}
             onLeaveJam={handleLeaveJam}
             participants={currentParticipants}
             rolesBySongId={rolesBySongId}
             onAdvanceState={handleAdvanceJamState}
             onUpdateSettings={handleUpdateJamSettings}
+            onRegenerateInviteCode={handleRegenerateInviteCode}
             onSetCurrentSong={handleSetCurrentSong}
             onApproveSong={handleApproveSong}
             onRejectSong={handleRejectSong}
@@ -912,7 +1484,12 @@ export default function App() {
             onDeleteJam={handleDeleteJam}
             onDeleteSong={handleDeleteSong}
             onEditSong={handleEditSong}
-            onAddHardware={handleAddHardware}
+            hardware={hardwareByJamId[selectedJamId] || []}
+            onSubmitHardware={handleSubmitHardware}
+            onUpdateHardware={handleUpdateHardware}
+            onRemoveHardware={handleRemoveHardware}
+            onApproveHardware={handleApproveHardware}
+            onRejectHardware={handleRejectHardware}
             onViewParticipant={setViewingParticipant}
             currentUserId={userId}
           />
@@ -943,6 +1520,9 @@ export default function App() {
             initialAvatarUrl={userAvatarUrl}
             onSave={handleUpdateProfile}
             onBack={goHome}
+            spotifyStatus={spotifyStatus}
+            onConnectSpotify={handleConnectSpotify}
+            onDisconnectSpotify={handleDisconnectSpotify}
             userId={userId}
           />
         );
@@ -960,6 +1540,7 @@ export default function App() {
         <ImportSongModal
           onClose={() => setIsImportModalOpen(false)}
           onImport={handleAddSong}
+          onImportMany={handleImportSongs}
         />
       )}
 
@@ -981,11 +1562,12 @@ export default function App() {
 
       <Header
         userId={userId}
-        userName={userName || 'Guest'}
+        userName={userName || ''}
         avatarUrl={userAvatarUrl}
-        onNavProfile={firebaseUser ? handleNavProfile : null}
+        onNavProfile={isGuest ? () => setGuestMode(false) : handleNavProfile}
         onNavHome={goHome}
-        onLogout={firebaseUser ? () => import('./services/firebase').then(m => m.logout()) : null}
+        onLogout={isGuest ? () => setGuestMode(false) : () => import('./services/firebase').then(m => m.logout())}
+        isGuest={isGuest}
       />
       <main className="max-w-4xl mx-auto px-4">{renderView()}</main>
     </div>

@@ -1,2 +1,15 @@
 front-end/node_modules
 front-end/dist
+.k8s-images.env
+.env
+.env.*
+!.env.example
+.claude/
+session_resume
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+front-end/.env.local
+playwright-report/

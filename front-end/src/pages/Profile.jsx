@@ -37,7 +37,7 @@ export const instrumentLabel = (inst) =>
     ? inst
     : inst.model
       ? `${inst.type} — ${inst.model}`
-      : (inst.type ?? inst.name ?? '');
+      : (inst.type ?? inst.instrument ?? inst.name ?? '');
 
 const Profile = ({
   initialUserName,
@@ -48,13 +48,17 @@ const Profile = ({
   onSave,
   onBack,
   onResetData,
+  spotifyStatus = { connected: false },
+  onConnectSpotify = () => {},
+  onDisconnectSpotify = () => {},
   userId,
 }) => {
   const [name,            setName]            = useState(initialUserName);
   const [instruments,     setInstruments]     = useState(initialInstruments || []);
   const [bio,             setBio]             = useState(initialBio || '');
   const [recordingLink,   setRecordingLink]   = useState(initialRecordingLink || '');
-  const [avatarUrl,  setAvatarUrl]  = useState(initialAvatarUrl || null);
+  const [avatarUrl,       setAvatarUrl]       = useState(initialAvatarUrl || null);
+  const [avatarFile,      setAvatarFile]      = useState(null);
 
   // Instrument add form state
   const [selType,  setSelType]  = useState('');
@@ -67,6 +71,7 @@ const Profile = ({
   const handleAvatarChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    setAvatarFile(file);
     const reader = new FileReader();
     reader.onload = (ev) => setAvatarUrl(ev.target.result);
     reader.readAsDataURL(file);
@@ -88,7 +93,7 @@ const Profile = ({
   // ── Save ────────────────────────────────────────────────────────────────────
   const handleSave = () => {
     if (!name) return;
-    onSave({ name, instruments, bio, recordingLink, avatarUrl });
+    onSave({ name, instruments, bio, recordingLink, avatarUrl, avatarFile });
   };
 
   // ── Reset ───────────────────────────────────────────────────────────────────
@@ -143,7 +148,7 @@ const Profile = ({
             </button>
             {avatarUrl && (
               <button
-                onClick={() => setAvatarUrl(null)}
+                onClick={() => { setAvatarUrl(null); setAvatarFile(null); }}
                 className="ml-3 text-gray-500 hover:text-red-400 text-sm"
               >
                 Remove
@@ -207,6 +212,34 @@ const Profile = ({
           />
         </div>
 
+        {/* ── Spotify ── */}
+        <div className="bg-gray-900/60 border border-gray-700 rounded-lg p-4 space-y-3">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-gray-200 text-sm font-bold">Spotify Import</p>
+              <p className="text-gray-400 text-sm mt-1">
+                Connect Spotify to import private, collaborative, or API-protected playlists.
+              </p>
+            </div>
+            <span className={`shrink-0 text-xs font-semibold px-2 py-1 rounded-full ${
+              spotifyStatus.connected ? 'bg-green-900 text-green-200' : 'bg-gray-700 text-gray-300'
+            }`}>
+              {spotifyStatus.connected ? 'Connected' : 'Not connected'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={spotifyStatus.connected ? onDisconnectSpotify : onConnectSpotify}
+            className={`w-full text-sm font-bold py-2 px-3 rounded-lg transition ${
+              spotifyStatus.connected
+                ? 'bg-transparent border border-gray-600 hover:bg-gray-700 text-gray-200'
+                : 'bg-green-600 hover:bg-green-500 text-white'
+            }`}
+          >
+            {spotifyStatus.connected ? 'Disconnect Spotify' : 'Connect Spotify'}
+          </button>
+        </div>
+
         {/* ── Instruments ── */}
         <div>
           <label className="block text-gray-400 text-sm font-bold mb-3">Instruments</label>
@@ -242,6 +275,7 @@ const Profile = ({
           {/* Add instrument form */}
           <form onSubmit={handleAddInstrument} className="space-y-3">
             <select
+              aria-label="Profile instrument"
               value={selType}
               onChange={(e) => { setSelType(e.target.value); setSelModel(''); }}
               className="w-full bg-gray-700 text-white p-2 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
@@ -261,6 +295,7 @@ const Profile = ({
 
             {selType && (
               <select
+                aria-label="Profile instrument skill"
                 value={selSkill}
                 onChange={(e) => setSelSkill(e.target.value)}
                 className="w-full bg-gray-700 text-white p-2 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"

@@ -8,20 +8,27 @@ A single override for get_current_user reads the token and maps it to a
 User loaded from the test DB — so multiple clients with different users
 can coexist in one test without clobbering app.dependency_overrides.
 """
-import uuid
+import os
 import pytest
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 
+os.environ.setdefault("DATABASE_URL", "sqlite://")
+os.environ.setdefault("MINIO_ACCESS_KEY", "test")
+os.environ.setdefault("MINIO_SECRET_KEY", "test")
+os.environ.setdefault("FIREBASE_PROJECT_ID", "test")
+
+from app.core import spotify as spotify_core
 from app.core.database import Base, get_db
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_current_user_id, get_optional_current_user
 from app.main import app
+from app.api.routers import songs as songs_router
 from app.models.user import User
 
 SQLITE_URL = "sqlite://"
@@ -89,28 +96,8 @@ def patched_app(db_session):
     def override_db():
         yield db_session
 
-    def override_auth(
-        credentials: HTTPAuthorizationCredentials = pytest.importorskip(
-            "fastapi.security", reason="need fastapi.security"
-        ) and __import__("fastapi.security", fromlist=["HTTPBearer"]).HTTPBearer(auto_error=False)(
-            __import__("fastapi", fromlist=["Request"]).Request(
-                {"type": "http", "headers": [], "method": "GET", "path": "/"}
-            )
-        ),
-    ):
-        pass  # placeholder — replaced below
-
-    # Real override: look up the user whose id == the token value
-    def real_override_auth(
-        credentials=__import__("fastapi", fromlist=["Depends"]).Depends(
-            __import__("fastapi.security", fromlist=["HTTPBearer"]).HTTPBearer(auto_error=False)
-        ),
-    ):
-        pass
-
     # Simpler inline version ↓
     from fastapi import Depends
-    from fastapi.security import HTTPBearer
 
     bearer = HTTPBearer(auto_error=False)
 
@@ -123,8 +110,24 @@ def patched_app(db_session):
             raise HTTPException(status_code=403, detail=f"No user {uid}")
         return user
 
+    def optional_auth_from_token(creds=Depends(bearer)):
+        if creds is None:
+            return None
+        uid = creds.credentials
+        user = db_session.get(User, uid)
+        if not user:
+            return None
+        return user
+
+    def uid_from_token(creds=Depends(bearer)):
+        if creds is None:
+            raise HTTPException(status_code=403, detail="No credentials")
+        return creds.credentials
+
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_current_user] = auth_from_token
+    app.dependency_overrides[get_current_user_id] = uid_from_token
+    app.dependency_overrides[get_optional_current_user] = optional_auth_from_token
 
     with patch("app.api.routers.jams.publish",  new_callable=AsyncMock), \
          patch("app.api.routers.songs.publish", new_callable=AsyncMock):
@@ -145,3 +148,21 @@ def client_a(patched_app, user_a):
 def client_b(patched_app, user_b):
     """TestClient authenticated as user_b — sends 'Bearer uid-b'."""
     return TestClient(app, headers={"Authorization": f"Bearer {user_b.id}"})
+
+
+@pytest.fixture(scope="function")
+def anon_client(patched_app):
+    return TestClient(app)
+
+
+@pytest.fixture(scope="function", autouse=True)
+def reset_spotify_test_config(monkeypatch):
+    """Keep Spotify-related tests independent from local .env credentials."""
+    for module_settings in (songs_router.settings, spotify_core.settings):
+        monkeypatch.setattr(module_settings, "SPOTIFY_CLIENT_ID", "")
+        monkeypatch.setattr(module_settings, "SPOTIFY_CLIENT_SECRET", "")
+    monkeypatch.setattr(songs_router.settings, "SPOTIFY_MARKET", "US")
+    monkeypatch.setattr(spotify_core.settings, "SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8000/spotify/callback")
+    monkeypatch.setattr(spotify_core.settings, "FRONTEND_URL", "http://localhost:8080")
+    monkeypatch.setattr(songs_router, "_spotify_access_token", None)
+    monkeypatch.setattr(songs_router, "_spotify_access_token_expires_at", 0.0)

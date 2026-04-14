@@ -104,16 +104,16 @@ const SongDetail = ({ song, roles, onApplyForRole, onLeaveRole, onBack, currentU
                 <p className="text-gray-400 text-sm">
                   Owner:{' '}
                   <span className={`font-semibold ${isOwner ? 'text-blue-300' : 'text-gray-200'}`}>
-                    {role.ownerName}{isOwner ? ' (you)' : ''}
+                    {role.ownerName ?? 'Unassigned'}{isOwner ? ' (you)' : ''}
                   </span>
                 </p>
 
-                {role.status === 'pending' && role.pendingUserName && (
+                {status === 'pending' && role.pendingUserName && (
                   <p className="text-yellow-400 text-xs mt-1">
                     Applied by: <span className="font-medium">{role.pendingUserName}</span>
                   </p>
                 )}
-                {role.status === 'taken' && (
+                {status === 'taken' && (
                   <p className="text-gray-400 text-xs mt-1">
                     Playing: <span className="text-gray-200 font-medium">{role.joinedByUserName}</span>
                   </p>
@@ -123,7 +123,7 @@ const SongDetail = ({ song, roles, onApplyForRole, onLeaveRole, onBack, currentU
               {/* Right — action buttons */}
               {isParticipant && !isCompleted && (
                 <div className="shrink-0">
-                  {role.status === 'open' && (
+                  {status === 'open' && (
                     <button
                       onClick={() => onApplyForRole(role.id)}
                       className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-5 rounded-lg transition shadow"
@@ -131,7 +131,7 @@ const SongDetail = ({ song, roles, onApplyForRole, onLeaveRole, onBack, currentU
                       {requiresApproval ? '✋ Apply' : '✓ I\'ll Play'}
                     </button>
                   )}
-                  {role.status === 'pending' && isApplicant && (
+                  {status === 'pending' && isApplicant && (
                     <button
                       onClick={() => onLeaveRole(role.id)}
                       className="bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white text-sm font-bold py-2 px-4 rounded-lg transition border border-gray-600"
@@ -139,7 +139,7 @@ const SongDetail = ({ song, roles, onApplyForRole, onLeaveRole, onBack, currentU
                       Cancel Application
                     </button>
                   )}
-                  {role.status === 'taken' && isPlayer && (
+                  {status === 'taken' && isPlayer && (
                     <button
                       onClick={() => onLeaveRole(role.id)}
                       className="bg-transparent border border-red-700 hover:bg-red-900 text-red-400 hover:text-red-300 text-sm font-bold py-2 px-4 rounded-lg transition"
