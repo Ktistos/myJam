@@ -29,7 +29,93 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      can_build: ${{ steps.check.outputs.can_build }}
+      can_deploy: ${{ steps.check.outputs.can_deploy }}
+    env:
+      BACKEND_IMAGE_REPO: ${{ vars.BACKEND_IMAGE_REPO }}
+      FRONTEND_IMAGE_REPO: ${{ vars.FRONTEND_IMAGE_REPO }}
+      APP_HOST: ${{ vars.APP_HOST }}
+      MINIO_API_HOST: ${{ vars.MINIO_API_HOST }}
+      MINIO_CONSOLE_HOST: ${{ vars.MINIO_CONSOLE_HOST }}
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+      VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+      VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+      VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+      VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+      KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+    steps:
+      - name: Check repository configuration
+        id: check
+        run: |
+          can_build=true
+          can_deploy=true
+
+          build_required=(
+            BACKEND_IMAGE_REPO
+            FRONTEND_IMAGE_REPO
+            FIREBASE_PROJECT_ID
+            VITE_FIREBASE_API_KEY
+            VITE_FIREBASE_AUTH_DOMAIN
+            VITE_FIREBASE_STORAGE_BUCKET
+            VITE_FIREBASE_MESSAGING_SENDER_ID
+            VITE_FIREBASE_APP_ID
+          )
+
+          deploy_required=(
+            APP_HOST
+            MINIO_API_HOST
+            MINIO_CONSOLE_HOST
+            POSTGRES_PASSWORD
+            MINIO_ROOT_USER
+            MINIO_ROOT_PASSWORD
+            KUBECONFIG_B64
+          )
+
+          for name in "${build_required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::notice::Missing build configuration: ${name}"
+              can_build=false
+            fi
+          done
+
+          for name in "${deploy_required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::notice::Missing deploy configuration: ${name}"
+              can_deploy=false
+            fi
+          done
+
+          if [[ "${can_build}" != "true" ]]; then
+            can_deploy=false
+          fi
+
+          echo "can_build=${can_build}" >> "${GITHUB_OUTPUT}"
+          echo "can_deploy=${can_deploy}" >> "${GITHUB_OUTPUT}"
+
+      - name: Summarize result
+        run: |
+          if [[ "${{ steps.check.outputs.can_build }}" == "true" ]]; then
+            echo "Build configuration is complete."
+          else
+            echo "Build configuration is incomplete. Build and deploy jobs will be skipped."
+          fi
+
+          if [[ "${{ steps.check.outputs.can_deploy }}" == "true" ]]; then
+            echo "Deploy configuration is complete."
+          else
+            echo "Deploy configuration is incomplete. Deploy job will be skipped."
+          fi
+
   build:
+    needs: preflight
+    if: ${{ needs.preflight.outputs.can_build == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       backend_image: ${{ steps.images.outputs.backend_image }}
@@ -72,8 +158,10 @@ jobs:
           echo "frontend_image=${FRONTEND_IMAGE}" >> "${GITHUB_OUTPUT}"
 
   deploy:
-    if: ${{ github.event_name == 'push' || github.event.inputs.deploy == 'true' }}
-    needs: build
+    if: ${{ (github.event_name == 'push' || github.event.inputs.deploy == 'true') && needs.preflight.outputs.can_deploy == 'true' }}
+    needs:
+      - preflight
+      - build
     runs-on: ubuntu-latest
     env:
       BACKEND_IMAGE: ${{ needs.build.outputs.backend_image }}

@@ -4,11 +4,15 @@ This repo is ready to host a `GitHub Actions + GHCR + Kubernetes` pipeline even
 before the GitHub repository exists. The workflow file is:
 
 - [build-and-deploy.yml](../.github/workflows/build-and-deploy.yml)
+- [bootstrap-github-actions.sh](../scripts/bootstrap-github-actions.sh)
 
 The pipeline does two things on every push to `main`:
 
 1. Builds the backend and frontend images.
 2. Pushes both images to GHCR and deploys the app stack to your cluster.
+
+If the repository is not configured yet, the workflow now exits cleanly and
+marks build/deploy as skipped instead of failing hard on missing secrets.
 
 ## Before You Push
 
@@ -26,6 +30,33 @@ If you prefer HTTPS:
 git remote add origin https://github.com/OWNER/REPO.git
 git push -u origin main
 ```
+
+## Fastest Repo Bootstrap
+
+If you install GitHub CLI, you can seed most Actions variables and secrets from
+your local env files instead of clicking through the GitHub UI:
+
+```bash
+bash scripts/bootstrap-github-actions.sh build
+bash scripts/bootstrap-github-actions.sh deploy
+```
+
+The script reads:
+
+- `.env`
+- `front-end/.env.local`
+
+What still must exist in your shell before `deploy`:
+
+- `APP_HOST`
+- `MINIO_API_HOST`
+- `MINIO_CONSOLE_HOST`
+- `POSTGRES_PASSWORD`
+- `MINIO_ROOT_USER`
+- `MINIO_ROOT_PASSWORD`
+- `KUBECONFIG_B64`
+
+If `gh` is not installed, use the manual variables/secrets sections below.
 
 ## Important Constraint
 
