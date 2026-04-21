@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jam
+  labels:
+    app.kubernetes.io/name: jam
+    app.kubernetes.io/part-of: jam

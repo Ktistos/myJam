@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAMESPACE="${APP_NAMESPACE:-jam}"
 IMAGE_ENV_FILE="${IMAGE_ENV_FILE:-${ROOT_DIR}/.k8s-images.env}"
 RUN_BACKEND_MIGRATION="${RUN_BACKEND_MIGRATION:-1}"
+REQUESTED_BACKEND_IMAGE="${BACKEND_IMAGE:-}"
+REQUESTED_FRONTEND_IMAGE="${FRONTEND_IMAGE:-}"
 
 usage() {
   cat <<EOF
@@ -33,6 +35,17 @@ if [[ -f "${IMAGE_ENV_FILE}" ]]; then
   source "${IMAGE_ENV_FILE}"
 fi
 
+BACKEND_IMAGE="${REQUESTED_BACKEND_IMAGE:-${BACKEND_IMAGE:-}}"
+FRONTEND_IMAGE="${REQUESTED_FRONTEND_IMAGE:-${FRONTEND_IMAGE:-}}"
+
+render_backend_image_manifest() {
+  local src="$1"
+
+  sed -E \
+    "s#^([[:space:]]*)image: (jam-backend:minikube|jam-backend:latest|docker[.]io/ktistos/myjam-backend:[^[:space:]]+)\$#\\1image: ${BACKEND_IMAGE}#" \
+    "${src}"
+}
+
 if [[ "${TARGET}" == "backend" || "${TARGET}" == "all" ]]; then
   : "${BACKEND_IMAGE:?Set BACKEND_IMAGE or create ${IMAGE_ENV_FILE} first.}"
 fi
@@ -43,8 +56,7 @@ fi
 if [[ "${TARGET}" == "backend" || "${TARGET}" == "all" ]]; then
   if [[ "${RUN_BACKEND_MIGRATION}" == "1" ]]; then
     kubectl -n "${APP_NAMESPACE}" delete job jam-backend-migrate --ignore-not-found
-    sed "s|image: jam-backend:minikube|image: ${BACKEND_IMAGE}|" \
-      "${ROOT_DIR}/k8s/minikube/backend-migrate-job.yaml" | kubectl apply -f -
+    render_backend_image_manifest "${ROOT_DIR}/k8s/minikube/backend-migrate-job.yaml" | kubectl apply -f -
     kubectl -n "${APP_NAMESPACE}" wait --for=condition=complete job/jam-backend-migrate --timeout=5m
   fi
 

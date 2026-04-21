@@ -102,6 +102,14 @@ render_manifest() {
     "${src}" > "${dst}"
 }
 
+render_backend_image_manifest() {
+  local src="$1"
+
+  sed -E \
+    "s#^([[:space:]]*)image: (jam-backend:minikube|jam-backend:latest|docker[.]io/ktistos/myjam-backend:[^[:space:]]+)\$#\\1image: ${BACKEND_IMAGE}#" \
+    "${src}"
+}
+
 patch_image_pull_secret() {
   local resource="$1"
 
@@ -268,8 +276,7 @@ kubectl -n "${STORAGE_NAMESPACE}" wait --for=condition=complete job/jam-minio-pu
 
 echo "Running database migration job..."
 kubectl -n "${APP_NAMESPACE}" delete job jam-backend-migrate --ignore-not-found
-sed "s|image: jam-backend:minikube|image: ${BACKEND_IMAGE}|" \
-  "${TMP_DIR}/backend-migrate-job.yaml" | kubectl apply -f -
+render_backend_image_manifest "${TMP_DIR}/backend-migrate-job.yaml" | kubectl apply -f -
 patch_image_pull_secret job/jam-backend-migrate
 kubectl -n "${APP_NAMESPACE}" wait --for=condition=complete job/jam-backend-migrate --timeout=5m
 

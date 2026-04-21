@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jam-config
+  labels:
+    app.kubernetes.io/name: jam
+    app.kubernetes.io/part-of: jam
+data:
+  REDIS_URL: redis://redis:6379
+  MINIO_ENDPOINT: minio:9000
+  MINIO_PUBLIC_URL: http://minio.local
+  BACKEND_PUBLIC_URL: http://jam.local
+  MINIO_BUCKET: avatars
+  MINIO_SECURE: "false"
+  FIREBASE_PROJECT_ID: your-firebase-project-id
+  SPOTIFY_MARKET: US
+  SPOTIFY_REDIRECT_URI: http://jam.local/spotify/callback
+  FRONTEND_URL: http://jam.local

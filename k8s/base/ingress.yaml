@@ -1,0 +1,129 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jam-app
+  labels:
+    app.kubernetes.io/name: jam-app
+    app.kubernetes.io/part-of: jam
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: jam.local
+      http:
+        paths:
+          - path: /users
+            pathType: Prefix
+            backend:
+              service:
+                name: jam-backend
+                port:
+                  number: 8000
+          - path: /jams
+            pathType: Prefix
+            backend:
+              service:
+                name: jam-backend
+                port:
+                  number: 8000
+          - path: /songs
+            pathType: Prefix
+            backend:
+              service:
+                name: jam-backend
+                port:
+                  number: 8000
+          - path: /uploads
+            pathType: Prefix
+            backend:
+              service:
+                name: jam-backend
+                port:
+                  number: 8000
+          - path: /events
+            pathType: Prefix
+            backend:
+              service:
+                name: jam-backend
+                port:
+                  number: 8000
+          - path: /spotify
+            pathType: Prefix
+            backend:
+              service:
+                name: jam-backend
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: jam-backend
+                port:
+                  number: 8000
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: jam-backend
+                port:
+                  number: 8000
+          - path: /openapi.json
+            pathType: Exact
+            backend:
+              service:
+                name: jam-backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jam-frontend
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jam-minio-api
+  labels:
+    app.kubernetes.io/name: jam-minio-api
+    app.kubernetes.io/part-of: jam
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: minio.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio
+                port:
+                  number: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jam-minio-console
+  labels:
+    app.kubernetes.io/name: jam-minio-console
+    app.kubernetes.io/part-of: jam
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: minio-console.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio-console
+                port:
+                  number: 9001

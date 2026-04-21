@@ -14,6 +14,8 @@ Required for registry pushes:
 
 Optional:
   IMAGE_TAG              defaults to current git short SHA
+  IMAGE_PLATFORMS        defaults to linux/amd64,linux/arm64 when pushing
+                         use linux/arm64 for ARM-only clusters
   RUN_BACKEND_MIGRATION  defaults to 1
 EOF
 }
@@ -32,14 +34,14 @@ case "${TARGET}" in
 esac
 
 if [[ "${TARGET}" == "backend" ]]; then
-  : "${BACKEND_IMAGE_REPO:?Set BACKEND_IMAGE_REPO, e.g. ghcr.io/your-org/myjam-backend}"
+  : "${BACKEND_IMAGE_REPO:?Set BACKEND_IMAGE_REPO, e.g. docker.io/ktistos/myjam-backend}"
 fi
 if [[ "${TARGET}" == "frontend" ]]; then
-  : "${FRONTEND_IMAGE_REPO:?Set FRONTEND_IMAGE_REPO, e.g. ghcr.io/your-org/myjam-frontend}"
+  : "${FRONTEND_IMAGE_REPO:?Set FRONTEND_IMAGE_REPO, e.g. docker.io/ktistos/myjam-frontend}"
 fi
 if [[ "${TARGET}" == "all" ]]; then
-  : "${BACKEND_IMAGE_REPO:?Set BACKEND_IMAGE_REPO, e.g. ghcr.io/your-org/myjam-backend}"
-  : "${FRONTEND_IMAGE_REPO:?Set FRONTEND_IMAGE_REPO, e.g. ghcr.io/your-org/myjam-frontend}"
+  : "${BACKEND_IMAGE_REPO:?Set BACKEND_IMAGE_REPO, e.g. docker.io/ktistos/myjam-backend}"
+  : "${FRONTEND_IMAGE_REPO:?Set FRONTEND_IMAGE_REPO, e.g. docker.io/ktistos/myjam-frontend}"
 fi
 
 PUSH_IMAGES=1 bash "${ROOT_DIR}/scripts/build-images.sh" "${TARGET}"
