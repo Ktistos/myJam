@@ -128,6 +128,21 @@ function normalizeInstrument(inst) {
   };
 }
 
+function normalizeAvatarUrl(url) {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const isLocalMinio = ['localhost', '127.0.0.1'].includes(parsed.hostname) && parsed.port === '9000';
+    const match = parsed.pathname.match(/^\/avatars\/avatars\/([^/]+)\/([^/]+)$/);
+    if (isLocalMinio && match) {
+      return `${api.API_BASE}/uploads/avatar/${match[1]}/${match[2]}`;
+    }
+  } catch {
+    return url;
+  }
+  return url;
+}
+
 // Converts a backend ParticipantOut to the frontend participant shape
 function normalizeParticipant(p) {
   const user = p.user ?? p;
@@ -136,7 +151,7 @@ function normalizeParticipant(p) {
     name: user.name,
     bio: user.bio ?? '',
     recordingLink: user.recording_link ?? '',
-    avatarUrl: user.avatar_url ?? null,
+    avatarUrl: normalizeAvatarUrl(user.avatar_url),
     instrumentObjects: (user.instruments || []).map(normalizeInstrument),
   };
 }
@@ -250,12 +265,17 @@ export default function App() {
   const [userRecordingLink,  setUserRecordingLink]  = useState('');
   const [userAvatarUrl,      setUserAvatarUrl]      = useState(null);
   const [spotifyStatus,      setSpotifyStatus]      = useState({ connected: false });
+  const authLoadSeqRef = useRef(0);
 
   const userId = firebaseUser?.uid ?? 'guest';
 
   // Listen for Firebase auth state — sync user profile + jams from backend
   useEffect(() => {
     return onAuthStateChanged(auth, async (fbUser) => {
+      const loadSeq = authLoadSeqRef.current + 1;
+      authLoadSeqRef.current = loadSeq;
+      const isCurrentAuthLoad = () => authLoadSeqRef.current === loadSeq;
+
       setFirebaseUser(fbUser ?? null);
       if (fbUser) {
         // Always set the Firebase display name immediately so the header never
@@ -274,25 +294,35 @@ export default function App() {
               avatar_url: fbUser.photoURL ?? '',
             });
           }
+          if (!isCurrentAuthLoad()) return;
           setUserName(profile.name);
           setUserBio(profile.bio ?? '');
           setUserRecordingLink(profile.recording_link ?? '');
-          setUserAvatarUrl(profile.avatar_url ?? '');
+          setUserAvatarUrl(normalizeAvatarUrl(profile.avatar_url));
           setUserInstruments((profile.instruments || []).map(normalizeInstrument));
 
           try {
-            setSpotifyStatus(await api.getSpotifyStatus());
+            const status = await api.getSpotifyStatus();
+            if (!isCurrentAuthLoad()) return;
+            setSpotifyStatus(status);
           } catch {
+            if (!isCurrentAuthLoad()) return;
             setSpotifyStatus({ connected: false });
           }
 
           // Load public jams from backend
           const backendJams = await api.listJams();
+          if (!isCurrentAuthLoad()) return;
           setJams(backendJams.map(normalizeJam));
         } catch {
           // Backend not reachable — Firebase name is already shown above
         }
       } else {
+        setUserName('');
+        setUserBio('');
+        setUserRecordingLink('');
+        setUserAvatarUrl(null);
+        setUserInstruments([]);
         setSpotifyStatus({ connected: false });
       }
     });
@@ -473,25 +503,6 @@ export default function App() {
   }, [firebaseUser]);
 
   // ── Profile ────────────────────────────────────────────────────────────────
-  const handleConnectSpotify = async () => {
-    try {
-      const { url } = await api.createSpotifyLoginUrl();
-      window.location.assign(url);
-    } catch (e) {
-      setModal({ title: 'Error', message: `Could not start Spotify login: ${e.message}` });
-    }
-  };
-
-  const handleDisconnectSpotify = async () => {
-    try {
-      const status = await api.disconnectSpotify();
-      setSpotifyStatus(status ?? { connected: false });
-      setModal({ title: 'Spotify Disconnected', message: 'Spotify playlist import was disconnected.' });
-    } catch (e) {
-      setModal({ title: 'Error', message: `Could not disconnect Spotify: ${e.message}` });
-    }
-  };
-
   const handleUpdateProfile = async ({ name: newName, instruments: newInstruments, bio, recordingLink, avatarUrl, avatarFile }) => {
     if (!newName) return;
     let savedAvatarUrl = avatarUrl;
@@ -502,6 +513,7 @@ export default function App() {
           const upload = await api.uploadAvatar(avatarFile);
           savedAvatarUrl = upload.url;
         }
+        savedAvatarUrl = normalizeAvatarUrl(savedAvatarUrl);
         await api.updateMe({
           name: newName,
           bio,
@@ -728,6 +740,24 @@ export default function App() {
     return roles;
   };
 
+  const refreshRolesForJam = async (jamId) => {
+    const songs = songsByJamId[jamId] || [];
+    const roleEntries = await Promise.all(
+      songs.map(async (song) => {
+        try {
+          const roles = await api.listRoles(song.id);
+          return [song.id, roles.map(normalizeRole)];
+        } catch {
+          return null;
+        }
+      })
+    );
+    const nextRoles = Object.fromEntries(roleEntries.filter(Boolean));
+    if (Object.keys(nextRoles).length > 0) {
+      setRolesBySongId((prev) => ({ ...prev, ...nextRoles }));
+    }
+  };
+
   // ── Join Jam ───────────────────────────────────────────────────────────────
   const handleJoinJam = (jamId) => {
     if (!firebaseUser) return;
@@ -924,6 +954,66 @@ export default function App() {
     goHome();
   };
 
+  const removeParticipantFromLocalState = (jamId, targetUserId) => {
+    setParticipantsByJamId((prev) => ({
+      ...prev,
+      [jamId]: (prev[jamId] || []).filter((p) => p.userId !== targetUserId),
+    }));
+    setHardwareByJamId((prev) => ({
+      ...prev,
+      [jamId]: (prev[jamId] || []).filter((item) => item.owner_id !== targetUserId),
+    }));
+    setRolesBySongId((prev) => {
+      const jamSongIds = new Set((songsByJamId[jamId] || []).map((song) => song.id));
+      const next = { ...prev };
+      for (const songId of jamSongIds) {
+        next[songId] = (next[songId] || [])
+          .filter((role) => role.ownerId !== targetUserId)
+          .map((role) => ({
+            ...role,
+            joinedByUserId: role.joinedByUserId === targetUserId ? null : role.joinedByUserId,
+            joinedByUserName: role.joinedByUserId === targetUserId ? null : role.joinedByUserName,
+            pendingUserId: role.pendingUserId === targetUserId ? null : role.pendingUserId,
+            pendingUserName: role.pendingUserId === targetUserId ? null : role.pendingUserName,
+          }));
+      }
+      return next;
+    });
+    setJams((prev) => prev.map((j) => {
+      if (j.id !== jamId) return j;
+      const loadedCount = participantsByJamId[jamId] || [];
+      const nextCount = Math.max(0, loadedCount.length ? loadedCount.length - 1 : (j.participantCount ?? 1) - 1);
+      return {
+        ...j,
+        admins: j.admins.filter((adminId) => adminId !== targetUserId),
+        participantCount: nextCount,
+        isParticipant: targetUserId === userId ? false : j.isParticipant,
+      };
+    }));
+  };
+
+  const handleRemoveParticipant = async (jamId, targetUserId) => {
+    if (targetUserId === userId) {
+      setModal({ title: 'Use Leave Jam', message: 'Use the Leave Jam action to remove yourself.' });
+      return;
+    }
+
+    if (firebaseUser) {
+      try {
+        await api.removeParticipant(jamId, targetUserId);
+        await reconcileJamFromBackend(jamId);
+        await refreshRolesForJam(jamId);
+        setModal({ title: 'Participant Removed', message: 'The participant was removed from the jam.' });
+      } catch (e) {
+        setModal({ title: 'Error', message: `Could not remove participant: ${e.message}` });
+      }
+      return;
+    }
+
+    removeParticipantFromLocalState(jamId, targetUserId);
+    setModal({ title: 'Participant Removed', message: 'The participant was removed from the jam.' });
+  };
+
   const refreshHardware = async (jamId) => {
     const hw = await api.listHardware(jamId);
     setHardwareByJamId((prev) => ({ ...prev, [jamId]: hw }));
@@ -1030,14 +1120,16 @@ export default function App() {
   };
 
   // ── Add Song ───────────────────────────────────────────────────────────────
-  const handleAddSong = async (title, artist) => {
+  const handleAddSong = async (title, artist, options = {}) => {
     if (!selectedJamId) return;
     const jam = jams.find((j) => j.id === selectedJamId);
-    const needsApproval = jam?.settings?.requireSongApproval;
+    const forcePending = Boolean(options.forcePending);
+    const needsApproval = forcePending || jam?.settings?.requireSongApproval;
+    const payload = forcePending ? { title, artist, status: 'pending' } : { title, artist };
 
     if (firebaseUser) {
       try {
-        const newSong = normalizeSong(await api.submitSong(selectedJamId, { title, artist }));
+        const newSong = normalizeSong(await api.submitSong(selectedJamId, payload));
         setSongsByJamId((prev) => ({
           ...prev,
           [selectedJamId]: [...(prev[selectedJamId] || []), newSong],
@@ -1071,17 +1163,17 @@ export default function App() {
     setIsImportModalOpen(false);
   };
 
+  const handleImportSong = (title, artist) => handleAddSong(title, artist, { forcePending: true });
+
   const handleImportSongs = async (songs) => {
     if (!selectedJamId || songs.length === 0) return;
-    const jam = jams.find((j) => j.id === selectedJamId);
-    const needsApproval = jam?.settings?.requireSongApproval;
 
     if (firebaseUser) {
       const importedSongs = [];
       try {
         for (const song of songs) {
           const newSong = normalizeSong(
-            await api.submitSong(selectedJamId, { title: song.title, artist: song.artist }),
+            await api.submitSong(selectedJamId, { title: song.title, artist: song.artist, status: 'pending' }),
           );
           importedSongs.push(newSong);
         }
@@ -1094,7 +1186,7 @@ export default function App() {
         }
         setModal({
           title: 'Import Incomplete',
-          message: `${importedSongs.length}/${songs.length} songs imported. Last error: ${e.message}`,
+          message: `${importedSongs.length}/${songs.length} songs submitted. Last error: ${e.message}`,
         });
         return;
       }
@@ -1109,7 +1201,7 @@ export default function App() {
         id: uid(),
         title: song.title,
         artist: song.artist,
-        status: needsApproval ? 'pending' : 'approved',
+        status: 'pending',
         submittedBy: userId,
         submittedByName: userName,
       }));
@@ -1126,10 +1218,8 @@ export default function App() {
     }
 
     setModal({
-      title: needsApproval ? 'Submitted' : 'Imported',
-      message: needsApproval
-        ? `${songs.length} songs submitted — waiting for admin approval.`
-        : `${songs.length} songs imported to the setlist.`,
+      title: 'Submitted',
+      message: `${songs.length} songs submitted — waiting for admin approval.`,
     });
     setIsImportModalOpen(false);
   };
@@ -1474,6 +1564,7 @@ export default function App() {
             onRejectRole={handleRejectRole}
             onAddAdmin={handleAddAdmin}
             onRemoveAdmin={handleRemoveAdmin}
+            onRemoveParticipant={handleRemoveParticipant}
             onDeleteJam={handleDeleteJam}
             onDeleteSong={handleDeleteSong}
             onEditSong={handleEditSong}
@@ -1506,6 +1597,7 @@ export default function App() {
       case 'profile':
         return (
           <Profile
+            key={userId}
             initialUserName={userName}
             initialInstruments={userInstruments}
             initialBio={userBio}
@@ -1513,9 +1605,6 @@ export default function App() {
             initialAvatarUrl={userAvatarUrl}
             onSave={handleUpdateProfile}
             onBack={goHome}
-            spotifyStatus={spotifyStatus}
-            onConnectSpotify={handleConnectSpotify}
-            onDisconnectSpotify={handleDisconnectSpotify}
             userId={userId}
           />
         );
@@ -1532,8 +1621,10 @@ export default function App() {
       {isImportModalOpen && (
         <ImportSongModal
           onClose={() => setIsImportModalOpen(false)}
-          onImport={handleAddSong}
+          onImport={handleImportSong}
           onImportMany={handleImportSongs}
+          isAuthenticated={!isGuest}
+          spotifyStatus={spotifyStatus}
         />
       )}
 

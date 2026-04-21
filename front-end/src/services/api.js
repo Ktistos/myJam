@@ -1,6 +1,7 @@
 import { auth } from './firebase';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+export const API_BASE = BASE;
 
 async function request(path, options = {}) {
   const token = await auth.currentUser?.getIdToken();
@@ -62,6 +63,7 @@ export const joinJam          = (id, code)    => request(
   { method: 'POST' }
 );
 export const leaveJam         = (id)          => request(`/jams/${id}/leave`,     { method: 'POST' });
+export const removeParticipant = (jamId, uid) => request(`/jams/${jamId}/participants/${uid}`, { method: 'DELETE' });
 export const listHardware     = (id)             => request(`/jams/${id}/hardware`);
 export const submitHardware   = (id, instrument) => request(`/jams/${id}/hardware?instrument=${encodeURIComponent(instrument)}`, { method: 'POST' });
 export const updateHardware   = (jamId, hwId, data) => request(`/jams/${jamId}/hardware/${hwId}`, { method: 'PATCH', body: JSON.stringify(data) });

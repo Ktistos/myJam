@@ -1,7 +1,14 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 const Header = ({ userId, userName, avatarUrl, onNavProfile, onNavHome, onLogout, isGuest }) => {
   const initials = userName?.charAt(0).toUpperCase() || '?';
+  const [avatarFailed, setAvatarFailed] = useState(false);
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [avatarUrl]);
+
+  const showAvatarImage = Boolean(avatarUrl) && !avatarFailed;
 
   return (
     <header className="sticky top-0 z-40 w-full bg-gray-900 shadow-lg p-4 flex flex-col sm:flex-row justify-between items-center">
@@ -25,8 +32,13 @@ const Header = ({ userId, userName, avatarUrl, onNavProfile, onNavHome, onLogout
             onClick={onNavProfile}
             className="flex items-center gap-3 bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-full transition"
           >
-            {avatarUrl ? (
-              <img src={avatarUrl} alt="avatar" className="w-7 h-7 rounded-full object-cover" />
+            {showAvatarImage ? (
+              <img
+                src={avatarUrl}
+                alt="avatar"
+                onError={() => setAvatarFailed(true)}
+                className="w-7 h-7 rounded-full object-cover"
+              />
             ) : (
               <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
                 {initials}

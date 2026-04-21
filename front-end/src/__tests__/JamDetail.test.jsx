@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import JamDetail from '../pages/JamDetail';
 
@@ -58,6 +58,7 @@ const setup = (overrides = {}) => {
     onRejectRole: vi.fn(),
     onAddAdmin: vi.fn(),
     onRemoveAdmin: vi.fn(),
+    onRemoveParticipant: vi.fn(),
     onDeleteJam: vi.fn(),
     onDeleteSong: vi.fn(),
     onEditSong: vi.fn(),
@@ -167,6 +168,162 @@ describe('JamDetail', () => {
     expect(props.onSongClick).toHaveBeenCalledWith('song-1');
   });
 
+  it('splits approved songs into current playlist and pending songs into proposed songs', () => {
+    setup({
+      songs: [
+        makeSong({ id: 'song-approved', title: 'Little Wing', status: 'approved' }),
+        makeSong({
+          id: 'song-pending',
+          title: 'Hey Joe',
+          artist: 'Jimi Hendrix',
+          status: 'pending',
+          submittedBy: 'user-2',
+          submittedByName: 'Morgan',
+        }),
+      ],
+    });
+
+    const currentPlaylist = screen.getByTestId('current-playlist-section');
+    const proposedSongs = screen.getByTestId('proposed-songs-section');
+
+    expect(within(currentPlaylist).getByRole('heading', { name: /current playlist/i })).toBeInTheDocument();
+    expect(within(currentPlaylist).getByText('Little Wing')).toBeInTheDocument();
+    expect(within(currentPlaylist).queryByText('Hey Joe')).not.toBeInTheDocument();
+    expect(within(proposedSongs).getByRole('heading', { name: /proposed songs/i })).toBeInTheDocument();
+    expect(within(proposedSongs).getByText('Hey Joe')).toBeInTheDocument();
+    expect(within(proposedSongs).queryByText('Little Wing')).not.toBeInTheDocument();
+  });
+
+  it('filters the current playlist with its search input', async () => {
+    setup({
+      songs: [
+        makeSong({ id: 'song-1', title: 'Little Wing', artist: 'Jimi Hendrix' }),
+        makeSong({ id: 'song-2', title: 'Red House', artist: 'Jimi Hendrix' }),
+      ],
+    });
+
+    await userEvent.type(screen.getByLabelText(/search current playlist/i), 'red');
+
+    const currentPlaylist = screen.getByTestId('current-playlist-section');
+    expect(within(currentPlaylist).getByText('Red House')).toBeInTheDocument();
+    expect(within(currentPlaylist).queryByText('Little Wing')).not.toBeInTheDocument();
+  });
+
+  it('filters proposed songs with its search input', async () => {
+    setup({
+      songs: [
+        makeSong({ id: 'song-1' }),
+        makeSong({ id: 'song-2', title: 'Hey Joe', status: 'pending', submittedBy: 'user-2', submittedByName: 'Morgan' }),
+        makeSong({ id: 'song-3', title: 'Cissy Strut', artist: 'The Meters', status: 'pending', submittedBy: 'user-3', submittedByName: 'Casey' }),
+      ],
+    });
+
+    await userEvent.type(screen.getByLabelText(/search proposed songs/i), 'meters');
+
+    const proposedSongs = screen.getByTestId('proposed-songs-section');
+    expect(within(proposedSongs).getByText('Cissy Strut')).toBeInTheDocument();
+    expect(within(proposedSongs).queryByText('Hey Joe')).not.toBeInTheDocument();
+  });
+
+  it('lets admins approve and reject proposed songs from the proposed list', async () => {
+    const props = setup({
+      isAdmin: true,
+      songs: [
+        makeSong({ id: 'song-1' }),
+        makeSong({ id: 'song-2', title: 'Hey Joe', status: 'pending', submittedBy: 'user-2', submittedByName: 'Morgan' }),
+        makeSong({ id: 'song-3', title: 'Cissy Strut', artist: 'The Meters', status: 'pending', submittedBy: 'user-3', submittedByName: 'Casey' }),
+      ],
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /approve hey joe/i }));
+    await userEvent.click(screen.getByRole('button', { name: /reject cissy strut/i }));
+
+    expect(props.onApproveSong).toHaveBeenCalledWith('jam-1', 'song-2');
+    expect(props.onRejectSong).toHaveBeenCalledWith('jam-1', 'song-3');
+  });
+
+  it('lets admins approve visible proposed songs as a batch', async () => {
+    const props = setup({
+      isAdmin: true,
+      songs: [
+        makeSong({ id: 'song-1' }),
+        makeSong({ id: 'song-2', title: 'Hey Joe', status: 'pending', submittedBy: 'user-2', submittedByName: 'Morgan' }),
+        makeSong({ id: 'song-3', title: 'Cissy Strut', artist: 'The Meters', status: 'pending', submittedBy: 'user-3', submittedByName: 'Casey' }),
+      ],
+    });
+
+    await userEvent.type(screen.getByLabelText(/search proposed songs/i), 'hey');
+    await userEvent.click(screen.getByRole('button', { name: /approve visible/i }));
+
+    expect(props.onApproveSong).toHaveBeenCalledTimes(1);
+    expect(props.onApproveSong).toHaveBeenCalledWith('jam-1', 'song-2');
+  });
+
+  it('lets admins switch to any approved playlist song by clicking the row during an in-progress jam', async () => {
+    const props = setup({
+      isAdmin: true,
+      jam: makeJam({ state: 'in-progress', currentSongId: 'song-1' }),
+      songs: [
+        makeSong({ id: 'song-1', title: 'Little Wing' }),
+        makeSong({ id: 'song-2', title: 'Red House', artist: 'Jimi Hendrix' }),
+      ],
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /switch to red house/i }));
+
+    expect(props.onSetCurrentSong).toHaveBeenCalledWith('jam-1', 'song-2');
+    expect(props.onSongClick).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /switch to little wing/i })).not.toBeInTheDocument();
+  });
+
+  it('lets admins switch to an approved playlist song with the explicit play action', async () => {
+    const props = setup({
+      isAdmin: true,
+      jam: makeJam({ state: 'in-progress', currentSongId: 'song-1' }),
+      songs: [
+        makeSong({ id: 'song-1', title: 'Little Wing' }),
+        makeSong({ id: 'song-2', title: 'Red House', artist: 'Jimi Hendrix' }),
+      ],
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /play red house now/i }));
+
+    expect(props.onSetCurrentSong).toHaveBeenCalledWith('jam-1', 'song-2');
+  });
+
+  it('keeps duplicate proposed songs as separate searchable rows', async () => {
+    const props = setup({
+      isAdmin: true,
+      songs: [
+        makeSong({ id: 'song-1' }),
+        makeSong({
+          id: 'song-dup-1',
+          title: 'Duplicate Song',
+          artist: 'Same Artist',
+          status: 'pending',
+          submittedBy: 'user-2',
+          submittedByName: 'Morgan',
+        }),
+        makeSong({
+          id: 'song-dup-2',
+          title: 'Duplicate Song',
+          artist: 'Same Artist',
+          status: 'pending',
+          submittedBy: 'user-3',
+          submittedByName: 'Casey',
+        }),
+      ],
+    });
+
+    await userEvent.type(screen.getByLabelText(/search proposed songs/i), 'duplicate');
+
+    const proposedSongs = screen.getByTestId('proposed-songs-section');
+    expect(within(proposedSongs).getAllByText('Duplicate Song')).toHaveLength(2);
+
+    await userEvent.click(within(proposedSongs).getByRole('button', { name: /approve duplicate song by same artist from casey/i }));
+    expect(props.onApproveSong).toHaveBeenCalledWith('jam-1', 'song-dup-2');
+  });
+
   it('edits a song inline and saves through onEditSong', async () => {
     const props = setup();
     await userEvent.click(screen.getByTitle(/edit song/i));
@@ -268,6 +425,28 @@ describe('JamDetail', () => {
     await userEvent.click(screen.getByTitle(/remove hardware/i));
 
     expect(props.onRemoveHardware).toHaveBeenCalledWith('jam-1', 'hw-1');
+  });
+
+  it('lets admins remove another participant from the participant list', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    const props = setup({
+      isAdmin: true,
+      currentUserId: 'admin-1',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /remove you from jam/i }));
+
+    expect(confirm).toHaveBeenCalledWith(
+      'Remove You from this jam? Their roles, pending claims, and hardware will be removed.'
+    );
+    expect(props.onRemoveParticipant).toHaveBeenCalledWith('jam-1', 'user-1');
+    expect(screen.queryByText('Bio')).not.toBeInTheDocument();
+  });
+
+  it('does not show participant remove actions to non-admins', () => {
+    setup();
+
+    expect(screen.queryByRole('button', { name: /remove you from jam/i })).not.toBeInTheDocument();
   });
 
   it('opens and closes the participant profile modal', async () => {

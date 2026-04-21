@@ -34,6 +34,17 @@ const SectionHeader = ({ children }) => (
   </h3>
 );
 
+const songMatchesSearch = (song, query) => {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return true;
+
+  return [song.title, song.artist, song.submittedByName]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .includes(normalizedQuery);
+};
+
 const JamDetail = ({
   jam,
   songs,
@@ -58,6 +69,7 @@ const JamDetail = ({
   onRejectRole,
   onAddAdmin,
   onRemoveAdmin,
+  onRemoveParticipant,
   onDeleteJam,
   onDeleteSong,
   onEditSong,
@@ -84,12 +96,16 @@ const JamDetail = ({
   const [editingSongId, setEditingSongId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [editArtist, setEditArtist] = useState('');
+  const [currentPlaylistSearch, setCurrentPlaylistSearch] = useState('');
+  const [proposedSongsSearch, setProposedSongsSearch] = useState('');
 
   if (!jam) return <LoadingSpinner />;
 
-  const approvedSongs      = songs.filter((s) => s.status === 'approved');
-  const mySentPendingSongs = songs.filter((s) => s.status === 'pending' && s.submittedBy === currentUserId);
-  const currentSong        = jam.currentSongId ? approvedSongs.find((s) => s.id === jam.currentSongId) : null;
+  const approvedSongs        = songs.filter((s) => s.status === 'approved');
+  const proposedSongs        = songs.filter((s) => s.status === 'pending');
+  const visibleApprovedSongs = approvedSongs.filter((song) => songMatchesSearch(song, currentPlaylistSearch));
+  const visibleProposedSongs = proposedSongs.filter((song) => songMatchesSearch(song, proposedSongsSearch));
+  const currentSong          = jam.currentSongId ? approvedSongs.find((s) => s.id === jam.currentSongId) : null;
   const isCompleted        = jam.state === 'completed';
   const canModify          = isParticipant && !isCompleted;
   const leavingDeletesJam  = isAdmin && jam.admins.length === 1;
@@ -122,6 +138,14 @@ const JamDetail = ({
       onEditSong(jam.id, songId, editTitle.trim(), editArtist.trim());
     }
     cancelEdit();
+  };
+
+  const approveVisibleProposedSongs = () => {
+    visibleProposedSongs.forEach((song) => onApproveSong(jam.id, song.id));
+  };
+
+  const rejectVisibleProposedSongs = () => {
+    visibleProposedSongs.forEach((song) => onRejectSong(jam.id, song.id));
   };
 
   const startEditHardware = (hardwareItem) => {
@@ -354,22 +378,49 @@ const JamDetail = ({
         </div>
       )}
 
-      {/* ── Setlist ── */}
-      <div className="mb-6">
-        <SectionHeader>🎵 Setlist</SectionHeader>
+      {/* ── Current Playlist ── */}
+      <div className="mb-6" data-testid="current-playlist-section">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+          <SectionHeader>
+            🎵 Current Playlist
+            <span className="text-xs font-bold bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">
+              {approvedSongs.length}
+            </span>
+          </SectionHeader>
+          <input
+            aria-label="Search current playlist"
+            type="search"
+            value={currentPlaylistSearch}
+            onChange={(e) => setCurrentPlaylistSearch(e.target.value)}
+            placeholder="Search approved songs..."
+            className="w-full sm:w-72 bg-gray-800 text-white text-sm p-2.5 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
+          />
+        </div>
 
         {approvedSongs.length === 0 ? (
           <div className="bg-gray-800 border border-gray-700 rounded-xl p-8 text-center">
             <p className="text-4xl mb-2">📋</p>
-            <p className="text-gray-400 text-sm">No songs in the setlist yet.</p>
+            <p className="text-gray-400 text-sm">No songs in the current playlist yet.</p>
             {canModify && <p className="text-gray-500 text-xs mt-1">Add the first song below!</p>}
+          </div>
+        ) : visibleApprovedSongs.length === 0 ? (
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center">
+            <p className="text-gray-400 text-sm">No current playlist songs match your search.</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {approvedSongs.map((song, idx) => {
+            {visibleApprovedSongs.map((song, idx) => {
               const isCurrent = jam.currentSongId === song.id;
               const canEditDelete = isAdmin || song.submittedBy === currentUserId;
+              const canSwitchToSong = isAdmin && jam.state === 'in-progress' && !isCurrent;
               const isEditing = editingSongId === song.id;
+              const handleApprovedSongClick = () => {
+                if (canSwitchToSong) {
+                  onSetCurrentSong(jam.id, song.id);
+                  return;
+                }
+                onSongClick(song.id);
+              };
 
               if (isEditing) {
                 return (
@@ -424,10 +475,19 @@ const JamDetail = ({
                       : 'bg-gray-800 border-gray-700 hover:bg-gray-700 hover:border-gray-500'
                   }`}
                 >
-                  {/* Clicking the song content navigates to song detail */}
+                  {/* During a live jam, admins can jump to any approved song in arbitrary order. */}
                   <div
                     className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer"
-                    onClick={() => onSongClick(song.id)}
+                    onClick={handleApprovedSongClick}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={canSwitchToSong ? `Switch to ${song.title}` : `Open ${song.title} details`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleApprovedSongClick();
+                      }
+                    }}
                   >
                     <span className={`text-sm font-bold w-6 text-center shrink-0 ${
                       isCurrent ? 'text-green-400' : 'text-gray-600'
@@ -443,12 +503,27 @@ const JamDetail = ({
                         NOW PLAYING
                       </span>
                     )}
-                    <span className="text-gray-600 text-sm shrink-0">›</span>
+                    <span className="text-gray-600 text-sm shrink-0">
+                      {canSwitchToSong ? 'PLAY' : '›'}
+                    </span>
                   </div>
 
                   {/* Edit/Delete actions */}
-                  {canEditDelete && (
+                  {(canSwitchToSong || canEditDelete) && (
                     <div className="flex items-center gap-1 shrink-0 ml-1">
+                      {canSwitchToSong && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSetCurrentSong(jam.id, song.id);
+                          }}
+                          className="bg-green-800 hover:bg-green-700 text-green-100 text-xs font-bold py-1 px-2.5 rounded-lg transition border border-green-700"
+                          aria-label={`Play ${song.title} now`}
+                          title="Play now"
+                        >
+                          Play Now
+                        </button>
+                      )}
                       <button
                         onClick={(e) => startEditSong(song, e)}
                         className="text-gray-500 hover:text-yellow-400 transition-colors p-1 rounded hover:bg-gray-700"
@@ -470,27 +545,101 @@ const JamDetail = ({
             })}
           </div>
         )}
+      </div>
 
-        {/* Pending song submissions — also show delete for submitter */}
-        {mySentPendingSongs.length > 0 && (
-          <div className="mt-3 space-y-2">
-            <p className="text-gray-500 text-xs uppercase font-semibold tracking-wider">Your pending submissions</p>
-            {mySentPendingSongs.map((song) => (
-              <div key={song.id} className="bg-gray-800 border border-yellow-900 p-3 rounded-lg flex items-center gap-3">
-                <span className="text-yellow-400 text-lg">⏳</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-200 font-medium">{song.title}</p>
-                  <p className="text-xs text-gray-500">{song.artist} · Awaiting approval</p>
+      {/* ── Proposed Songs ── */}
+      <div className="mb-6" data-testid="proposed-songs-section">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+          <SectionHeader>
+            ⏳ Proposed Songs
+            <span className="text-xs font-bold bg-yellow-900 text-yellow-200 px-2 py-0.5 rounded-full border border-yellow-800">
+              {proposedSongs.length}
+            </span>
+          </SectionHeader>
+          <input
+            aria-label="Search proposed songs"
+            type="search"
+            value={proposedSongsSearch}
+            onChange={(e) => setProposedSongsSearch(e.target.value)}
+            placeholder="Search proposed songs..."
+            className="w-full sm:w-72 bg-gray-800 text-white text-sm p-2.5 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 placeholder-gray-500"
+          />
+        </div>
+
+        {isAdmin && visibleProposedSongs.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-3">
+            <button
+              onClick={approveVisibleProposedSongs}
+              className="bg-green-700 hover:bg-green-600 text-white text-xs font-bold py-2 px-3 rounded-lg transition"
+            >
+              Approve Visible
+            </button>
+            <button
+              onClick={rejectVisibleProposedSongs}
+              className="bg-red-800 hover:bg-red-700 text-white text-xs font-bold py-2 px-3 rounded-lg transition"
+            >
+              Reject Visible
+            </button>
+          </div>
+        )}
+
+        {proposedSongs.length === 0 ? (
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center">
+            <p className="text-gray-400 text-sm">No proposed songs waiting for approval.</p>
+          </div>
+        ) : visibleProposedSongs.length === 0 ? (
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center">
+            <p className="text-gray-400 text-sm">No proposed songs match your search.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {visibleProposedSongs.map((song) => {
+              const submittedByName = song.submittedByName || 'Unknown participant';
+              const canWithdraw = song.submittedBy === currentUserId;
+
+              return (
+                <div key={song.id} className="bg-gray-800 border border-yellow-900 p-3 rounded-lg flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <span className="text-yellow-400 text-lg shrink-0">⏳</span>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm text-gray-100 font-semibold truncate">{song.title}</h4>
+                      <p className="text-xs text-gray-400 truncate">{song.artist}</p>
+                      <p className="text-xs text-gray-500 truncate">Proposed by {submittedByName}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isAdmin && (
+                      <>
+                        <button
+                          onClick={() => onApproveSong(jam.id, song.id)}
+                          className="bg-green-700 hover:bg-green-600 text-white text-xs font-bold py-1.5 px-3 rounded-lg transition"
+                          aria-label={`Approve ${song.title} by ${song.artist} from ${submittedByName}`}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => onRejectSong(jam.id, song.id)}
+                          className="bg-red-800 hover:bg-red-700 text-white text-xs font-bold py-1.5 px-3 rounded-lg transition"
+                          aria-label={`Reject ${song.title} by ${song.artist} from ${submittedByName}`}
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+                    {canWithdraw && (
+                      <button
+                        onClick={() => onDeleteSong(jam.id, song.id)}
+                        className="text-gray-500 hover:text-red-400 transition-colors p-1 rounded hover:bg-gray-700"
+                        title="Withdraw submission"
+                      >
+                        🗑
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <button
-                  onClick={() => onDeleteSong(jam.id, song.id)}
-                  className="text-gray-500 hover:text-red-400 transition-colors p-1 rounded hover:bg-gray-700 shrink-0"
-                  title="Withdraw submission"
-                >
-                  🗑
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -714,6 +863,22 @@ const JamDetail = ({
                     </div>
                   )}
                 </div>
+                {isAdmin && p.userId !== currentUserId && (
+                  <button
+                    type="button"
+                    title={`Remove ${p.name} from jam`}
+                    aria-label={`Remove ${p.name} from jam`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`Remove ${p.name} from this jam? Their roles, pending claims, and hardware will be removed.`)) {
+                        onRemoveParticipant(jam.id, p.userId);
+                      }
+                    }}
+                    className="ml-auto shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg border border-red-800 text-red-300 hover:bg-red-950 hover:border-red-600 transition-colors"
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
             ))}
           </div>

@@ -564,6 +564,25 @@ function removeUnclaimedRolesForHardware(state: AuthenticatedMockState, jamId: s
   }
 }
 
+function removeParticipantResources(state: AuthenticatedMockState, jamId: string, userId: string) {
+  state.hardwareByJamId ??= {};
+  state.hardwareByJamId[jamId] = (state.hardwareByJamId[jamId] ?? []).filter(
+    (item) => item.owner_id !== userId
+  );
+
+  for (const song of state.songsByJamId[jamId] ?? []) {
+    state.rolesBySongId[song.id] = (state.rolesBySongId[song.id] ?? [])
+      .filter((role) => role.owner_id !== userId)
+      .map((role) => ({
+        ...role,
+        joined_by: role.joined_by === userId ? null : role.joined_by,
+        joined_by_name: role.joined_by === userId ? null : role.joined_by_name,
+        pending_user: role.pending_user === userId ? null : role.pending_user,
+        pending_user_name: role.pending_user === userId ? null : role.pending_user_name,
+      }));
+  }
+}
+
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     status,
@@ -710,7 +729,7 @@ async function handleAuthenticatedRoute(route: Route, state: AuthenticatedMockSt
   }
 
   if (pathname === '/uploads/avatar' && method === 'POST') {
-    await fulfillJson(route, { url: 'http://127.0.0.1:9000/mock/taylor-avatar.png' });
+    await fulfillJson(route, { url: 'http://localhost:8000/uploads/avatar/mock-user/taylor-avatar.png' });
     return;
   }
 
@@ -866,6 +885,42 @@ async function handleAuthenticatedRoute(route: Route, state: AuthenticatedMockSt
     jam.admin_ids = jam.admin_ids.filter((adminId) => adminId !== state.profile.id);
     syncParticipantCount(state, jamId);
     await fulfillJson(route, { detail: 'Left', deleted_jam: false });
+    return;
+  }
+
+  if (pathname.startsWith('/jams/') && pathname.includes('/participants/') && method === 'DELETE') {
+    const [, , jamId, , targetUserId] = pathname.split('/');
+    const jam = findJam(state.jams, jamId);
+    if (!jam) {
+      await fulfillJson(route, { detail: 'Jam not found' }, 404);
+      return;
+    }
+    if (!jam.admin_ids.includes(state.profile.id)) {
+      await fulfillJson(route, { detail: 'Admin only' }, 403);
+      return;
+    }
+    if (targetUserId === state.profile.id) {
+      await fulfillJson(route, { detail: 'Use leave jam to remove yourself' }, 400);
+      return;
+    }
+    const wasParticipant = isParticipant(state, jamId, targetUserId);
+    const wasAdmin = jam.admin_ids.includes(targetUserId);
+    if (!wasParticipant && !wasAdmin) {
+      await fulfillJson(route, { detail: 'Participant not found' }, 404);
+      return;
+    }
+    if (wasAdmin && jam.admin_ids.length <= 1) {
+      await fulfillJson(route, { detail: 'Cannot remove the last admin' }, 400);
+      return;
+    }
+
+    state.participantsByJamId[jamId] = (state.participantsByJamId[jamId] ?? []).filter(
+      (participant) => participant.user.id !== targetUserId
+    );
+    jam.admin_ids = jam.admin_ids.filter((adminId) => adminId !== targetUserId);
+    removeParticipantResources(state, jamId, targetUserId);
+    syncParticipantCount(state, jamId);
+    await fulfillJson(route, { detail: 'Participant removed', removed_admin: wasAdmin });
     return;
   }
 
@@ -1063,7 +1118,7 @@ async function handleAuthenticatedRoute(route: Route, state: AuthenticatedMockSt
       jam_id: jamId,
       title: body.title,
       artist: body.artist,
-      status: jam.require_song_approval ? 'pending' : 'approved',
+      status: body.status === 'pending' || jam.require_song_approval ? 'pending' : 'approved',
       submitted_by: state.profile.id,
       submitted_by_name: state.profile.name,
       created_at: new Date().toISOString(),

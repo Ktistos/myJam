@@ -463,6 +463,91 @@ async def leave_jam(
     return {"detail": "Left", "deleted_jam": False}
 
 
+def _cleanup_removed_participant_resources(db: Session, jam_id: UUID, user_id: str) -> tuple[bool, bool]:
+    removed_hardware = False
+    changed_roles = False
+
+    hardware_items = db.query(JamHardware).filter(
+        JamHardware.jam_id == jam_id,
+        JamHardware.owner_id == user_id,
+    ).with_for_update().all()
+    for hw in hardware_items:
+        db.delete(hw)
+        removed_hardware = True
+
+    roles = db.query(Role).join(Song, Role.song_id == Song.id).filter(
+        Song.jam_id == jam_id,
+    ).with_for_update(of=Role).all()
+    for role in roles:
+        if role.owner_id == user_id:
+            db.delete(role)
+            changed_roles = True
+            continue
+        if role.joined_by == user_id:
+            role.joined_by = None
+            changed_roles = True
+        if role.pending_user == user_id:
+            role.pending_user = None
+            changed_roles = True
+
+    return removed_hardware, changed_roles
+
+
+@router.delete("/{jam_id}/participants/{user_id}", status_code=status.HTTP_200_OK)
+async def remove_participant(
+    jam_id: UUID,
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    jam = _get_locked_jam(db, jam_id)
+    if not jam:
+        raise HTTPException(status_code=404, detail="Jam not found")
+    if not _get_locked_admin_row(db, jam_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Admin only")
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Use leave jam to remove yourself")
+
+    participant_row = _get_locked_participant_row(db, jam_id, user_id)
+    admin_rows = db.query(JamAdmin).filter(JamAdmin.jam_id == jam_id).with_for_update().all()
+    admin_row = next((row for row in admin_rows if row.user_id == user_id), None)
+    if not participant_row and not admin_row:
+        raise HTTPException(status_code=404, detail="Participant not found")
+    if admin_row is not None and len(admin_rows) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot remove the last admin")
+
+    removed_hardware, changed_roles = _cleanup_removed_participant_resources(db, jam_id, user_id)
+    if participant_row:
+        db.delete(participant_row)
+    if admin_row:
+        db.delete(admin_row)
+
+    db.commit()
+    await publish(
+        f"jam:{jam_id}",
+        json.dumps(
+            {
+                "type": "participant_left",
+                "user_id": user_id,
+                "was_admin": admin_row is not None,
+                "removed_by_admin": True,
+            }
+        ),
+    )
+    if admin_row is not None:
+        await publish(f"jam:{jam_id}", json.dumps({"type": "jam_updated", "jam": str(jam_id)}))
+    if removed_hardware:
+        await publish(f"jam:{jam_id}", json.dumps({"type": "hardware_updated", "jam": str(jam_id)}))
+    if changed_roles:
+        await publish(f"jam:{jam_id}", json.dumps({"type": "role_updated", "jam": str(jam_id)}))
+    return {
+        "detail": "Participant removed",
+        "removed_admin": admin_row is not None,
+        "removed_hardware": removed_hardware,
+        "changed_roles": changed_roles,
+    }
+
+
 def _create_roles_for_hardware(db: Session, jam_id: UUID, instrument: str, owner_id: str) -> None:
     """Create roles in all existing songs for a newly-approved hardware item."""
     songs = db.query(Song).filter(Song.jam_id == jam_id).all()

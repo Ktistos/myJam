@@ -536,6 +536,45 @@ def test_upload_avatar_missing_filename(client_a):
     assert resp.status_code != 500, resp.text
 
 
+def test_upload_avatar_returns_backend_proxy_url(client_a, monkeypatch):
+    from io import BytesIO
+
+    monkeypatch.setattr("app.api.routers.uploads.settings.BACKEND_PUBLIC_URL", "http://api.test")
+    files = {"file": ("avatar.png", BytesIO(b"png-data"), "image/png")}
+    with patch("app.api.routers.uploads.get_minio") as minio_mock:
+        minio_mock.return_value.put_object.return_value = None
+        resp = client_a.post("/uploads/avatar", files=files)
+
+    assert resp.status_code == 200
+    assert resp.json()["url"].startswith("http://api.test/uploads/avatar/uid-a/")
+    assert resp.json()["url"].endswith(".png")
+
+
+def test_get_avatar_serves_minio_object(anon_client):
+    class FakeMinioObject:
+        headers = {"Content-Type": "image/png"}
+
+        def read(self):
+            return b"png-data"
+
+        def close(self):
+            self.closed = True
+
+        def release_conn(self):
+            self.released = True
+
+    minio_object = FakeMinioObject()
+    with patch("app.api.routers.uploads.get_minio") as minio_mock:
+        minio_mock.return_value.get_object.return_value = minio_object
+        resp = anon_client.get("/uploads/avatar/uid-a/avatar.png")
+
+    assert resp.status_code == 200
+    assert resp.content == b"png-data"
+    assert resp.headers["content-type"] == "image/png"
+    assert "max-age=31536000" in resp.headers["cache-control"]
+    minio_mock.return_value.get_object.assert_called_once_with("avatars", "avatars/uid-a/avatar.png")
+
+
 def test_upload_avatar_rejects_large_file_before_minio(client_a):
     from io import BytesIO
     from app.api.routers.uploads import MAX_SIZE

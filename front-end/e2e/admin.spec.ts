@@ -120,8 +120,92 @@ test.describe('Admin and invite browser flows', () => {
     await expect(page.getByText(/playing:\s*jamie cross/i)).toBeVisible();
   });
 
+  test('removes a participant and clears their hardware and pending role claims', async ({ page }) => {
+    const data = clone(defaultAuthenticatedData);
+    const adminJam = data.jams.find((jam) => jam.id === 'jam-admin');
+    if (!adminJam) throw new Error('Missing jam-admin fixture');
+    adminJam.require_role_approval = true;
+    adminJam.participant_count = 2;
+
+    data.participantsByJamId['jam-admin'].push({
+      user: {
+        id: 'uid-removable',
+        name: 'Jamie Cross',
+        bio: 'Soul vocalist.',
+        recording_link: '',
+        avatar_url: '',
+        instruments: [
+          { instrument: 'Vocals', skill_level: 'advanced' },
+          { instrument: 'Drums', skill_level: 'intermediate' },
+        ],
+      },
+      joined_at: '2026-06-12T18:45:00.000Z',
+    });
+    data.hardwareByJamId = {
+      ...data.hardwareByJamId,
+      'jam-admin': [
+        {
+          id: 'hw-removable-drums',
+          instrument: 'Drums',
+          owner_id: 'uid-removable',
+          owner_name: 'Jamie Cross',
+          status: 'approved',
+        },
+      ],
+    };
+    data.rolesBySongId['song-admin-1'].push({
+      id: 'role-removable-drums',
+      song_id: 'song-admin-1',
+      instrument: 'Drums',
+      owner_id: 'uid-removable',
+      owner_name: 'Jamie Cross',
+      joined_by: null,
+      joined_by_name: null,
+      pending_user: null,
+      pending_user_name: null,
+    });
+    const vocalsRole = data.rolesBySongId['song-admin-1'].find((item) => item.id === 'role-admin-open');
+    if (!vocalsRole) throw new Error('Missing role-admin-open fixture');
+    vocalsRole.pending_user = 'uid-removable';
+    vocalsRole.pending_user_name = 'Jamie Cross';
+
+    await openSignedInApp(page, data);
+
+    await page.getByText('House Band Rehearsal').click();
+    await expect(page.getByText(/jamie cross wants to play vocals on .*crossroads/i)).toBeVisible();
+    await expect(page.locator('div').filter({ hasText: /Drums\s*from\s*Jamie Cross/ }).first()).toBeVisible();
+
+    page.once('dialog', async (dialog) => {
+      expect(dialog.message()).toContain('Remove Jamie Cross from this jam?');
+      await dialog.accept();
+    });
+    await page.getByRole('button', { name: /remove jamie cross from jam/i }).click();
+
+    await expect(page.getByRole('heading', { name: /participant removed/i })).toBeVisible();
+    await page.getByRole('button', { name: /close/i }).click();
+
+    await expect(page.getByText(/jamie cross wants to play vocals/i)).toHaveCount(0);
+    await expect(page.locator('div').filter({ hasText: /Drums\s*from\s*Jamie Cross/ })).toHaveCount(0);
+
+    await page.getByText('Crossroads').click();
+    await expect(page.getByRole('heading', { name: 'Drums' })).toHaveCount(0);
+    await expect(page.getByText(/pending:\s*jamie cross/i)).toHaveCount(0);
+  });
+
   test('advances the jam state and sets the current song in progress', async ({ page }) => {
-    await openSignedInApp(page);
+    const data = clone(defaultAuthenticatedData);
+    data.songsByJamId['jam-admin'].push({
+      id: 'song-admin-2',
+      jam_id: 'jam-admin',
+      title: 'Sunshine of Your Love',
+      artist: 'Cream',
+      status: 'approved',
+      submitted_by: 'uid-auth',
+      submitted_by_name: 'Taylor Stone',
+      created_at: '2026-06-12T18:45:00.000Z',
+    });
+
+    await openSignedInApp(page, data);
 
     await page.getByText('House Band Rehearsal').click();
     await page.getByRole('button', { name: /tuning/i }).click();
@@ -135,5 +219,10 @@ test.describe('Admin and invite browser flows', () => {
 
     await expect(page.getByText(/no song playing/i)).toHaveCount(0);
     await expect(page.getByText('NOW PLAYING', { exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: /switch to sunshine of your love/i }).click();
+
+    await expect(page.getByRole('button', { name: /switch to crossroads/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /switch to sunshine of your love/i })).toHaveCount(0);
   });
 });

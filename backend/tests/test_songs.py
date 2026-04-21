@@ -46,6 +46,20 @@ def test_submit_song_pending_when_approval_required(client_a):
     assert resp.json()["status"] == "pending"
 
 
+def test_submit_song_can_request_pending_even_without_approval_required(client_a):
+    jam = _create_jam(client_a)
+    resp = _submit_song(client_a, jam["id"], {**SONG_PAYLOAD, "status": "pending"})
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "pending"
+
+
+def test_submit_song_cannot_request_preapproved_status(client_a):
+    jam = _create_jam(client_a)
+    resp = _submit_song(client_a, jam["id"], {**SONG_PAYLOAD, "status": "approved"})
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Cannot submit pre-approved songs"
+
+
 def test_submit_song_non_participant_forbidden(client_a, client_b):
     jam = _create_jam(client_a)
     resp = _submit_song(client_b, jam["id"])

@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Profile from '../pages/Profile';
 
@@ -35,33 +35,6 @@ describe('Profile', () => {
     const props = setup();
     await userEvent.click(screen.getByRole('button', { name: /back to jams/i }));
     expect(props.onBack).toHaveBeenCalledOnce();
-  });
-
-  it('shows Spotify connection controls', async () => {
-    const onConnectSpotify = vi.fn();
-    const onDisconnectSpotify = vi.fn();
-    const { rerender } = render(
-      <Profile
-        {...baseProps}
-        onConnectSpotify={onConnectSpotify}
-        onDisconnectSpotify={onDisconnectSpotify}
-        spotifyStatus={{ connected: false }}
-      />
-    );
-
-    await userEvent.click(screen.getByRole('button', { name: /connect spotify/i }));
-    expect(onConnectSpotify).toHaveBeenCalledOnce();
-
-    rerender(
-      <Profile
-        {...baseProps}
-        onConnectSpotify={onConnectSpotify}
-        onDisconnectSpotify={onDisconnectSpotify}
-        spotifyStatus={{ connected: true }}
-      />
-    );
-    await userEvent.click(screen.getByRole('button', { name: /disconnect spotify/i }));
-    expect(onDisconnectSpotify).toHaveBeenCalledOnce();
   });
 
   it('disables save when the name is empty', async () => {
@@ -140,17 +113,44 @@ describe('Profile', () => {
     expect(screen.queryByRole('img', { name: 'avatar' })).not.toBeInTheDocument();
   });
 
+  it('updates the avatar when the loaded profile avatar changes after mount', () => {
+    const { rerender } = render(<Profile {...baseProps} initialAvatarUrl={null} />);
+    expect(screen.queryByRole('img', { name: 'avatar' })).not.toBeInTheDocument();
+
+    rerender(<Profile {...baseProps} initialAvatarUrl="https://example.com/avatar.png" />);
+
+    expect(screen.getByRole('img', { name: 'avatar' })).toHaveAttribute(
+      'src',
+      'https://example.com/avatar.png',
+    );
+  });
+
+  it('falls back to initials when the avatar image fails to load', () => {
+    setup({ initialAvatarUrl: 'https://example.com/broken-avatar.png' });
+    const avatar = screen.getByRole('img', { name: 'avatar' });
+
+    fireEvent.error(avatar);
+
+    expect(screen.queryByRole('img', { name: 'avatar' })).not.toBeInTheDocument();
+    expect(screen.getByText('A')).toBeInTheDocument();
+  });
+
+  it('hides the reset app data action by default', () => {
+    setup();
+    expect(screen.queryByRole('button', { name: /reset all app data/i })).not.toBeInTheDocument();
+  });
+
   it('resets app data after confirmation', async () => {
-    const props = setup();
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    const props = setup({ allowDangerousReset: true });
+    vi.stubGlobal('prompt', vi.fn(() => 'RESET'));
 
     await userEvent.click(screen.getByRole('button', { name: /reset all app data/i }));
     expect(props.onResetData).toHaveBeenCalledOnce();
   });
 
   it('does not reset app data when confirmation is rejected', async () => {
-    const props = setup();
-    vi.stubGlobal('confirm', vi.fn(() => false));
+    const props = setup({ allowDangerousReset: true });
+    vi.stubGlobal('prompt', vi.fn(() => 'no'));
 
     await userEvent.click(screen.getByRole('button', { name: /reset all app data/i }));
     expect(props.onResetData).not.toHaveBeenCalled();

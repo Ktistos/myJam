@@ -39,6 +39,13 @@ describe('Header', () => {
     expect(img).toHaveAttribute('src', 'https://example.com/pic.jpg');
   });
 
+  it('falls back to initials when avatarUrl fails to load', () => {
+    render(<Header {...baseProps} avatarUrl="https://example.com/broken.jpg" />);
+    fireEvent.error(screen.getByRole('img', { name: 'avatar' }));
+    expect(screen.queryByRole('img', { name: 'avatar' })).not.toBeInTheDocument();
+    expect(screen.getByText('A')).toBeInTheDocument();
+  });
+
   it('calls onNavHome when brand is clicked', () => {
     const onNavHome = vi.fn();
     render(<Header {...baseProps} onNavHome={onNavHome} />);

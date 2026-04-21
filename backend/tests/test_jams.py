@@ -348,6 +348,55 @@ def test_leave_jam_not_participant(client_a, client_b):
     assert resp.status_code == 404
 
 
+def test_admin_can_remove_participant_and_cleanup_resources(client_a, client_b):
+    jam = client_a.post("/jams", json={**JAM_PAYLOAD, "require_role_approval": True}).json()
+    client_b.post(f"/jams/{jam['id']}/join")
+    song = client_a.post(
+        f"/songs/jam/{jam['id']}",
+        json={"title": "Little Wing", "artist": "Jimi Hendrix"},
+    ).json()
+    client_b.post(f"/jams/{jam['id']}/hardware?instrument=Drums")
+
+    roles = client_a.get(f"/songs/{song['id']}/roles").json()
+    vocals = next(role for role in roles if role["instrument"] == "Vocals")
+    claim = client_b.post(f"/songs/roles/{vocals['id']}/claim")
+    assert claim.status_code == 200
+    assert claim.json()["pending_user"] == "uid-b"
+
+    resp = client_a.delete(f"/jams/{jam['id']}/participants/uid-b")
+
+    assert resp.status_code == 200
+    assert resp.json()["removed_admin"] is False
+    participants = client_a.get(f"/jams/{jam['id']}/participants").json()
+    assert "uid-b" not in [participant["user"]["id"] for participant in participants]
+
+    hardware = client_a.get(f"/jams/{jam['id']}/hardware").json()
+    assert all(item["owner_id"] != "uid-b" for item in hardware)
+
+    roles = client_a.get(f"/songs/{song['id']}/roles").json()
+    assert all(role["owner_id"] != "uid-b" for role in roles)
+    assert all(role["joined_by"] != "uid-b" for role in roles)
+    assert all(role["pending_user"] != "uid-b" for role in roles)
+
+
+def test_remove_participant_requires_admin(client_a, client_b):
+    jam = client_a.post("/jams", json=JAM_PAYLOAD).json()
+    client_b.post(f"/jams/{jam['id']}/join")
+
+    resp = client_b.delete(f"/jams/{jam['id']}/participants/uid-a")
+
+    assert resp.status_code == 403
+
+
+def test_remove_participant_rejects_self_removal(client_a):
+    jam = client_a.post("/jams", json=JAM_PAYLOAD).json()
+
+    resp = client_a.delete(f"/jams/{jam['id']}/participants/uid-a")
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Use leave jam to remove yourself"
+
+
 # ── Hardware ──────────────────────────────────────────────────────────────────
 
 def test_add_hardware_as_participant(client_a):
@@ -645,6 +694,20 @@ def test_remove_admin(client_a, client_b, user_b):
     assert resp.json()["already_removed"] is False
     jam_data = client_a.get(f"/jams/{jam['id']}").json()
     assert user_b.id not in jam_data["admin_ids"]
+
+
+def test_remove_participant_removes_admin_role_for_target_admin(client_a, user_b):
+    jam = client_a.post("/jams", json=JAM_PAYLOAD).json()
+    client_a.post(f"/jams/{jam['id']}/admins/{user_b.id}")
+
+    resp = client_a.delete(f"/jams/{jam['id']}/participants/{user_b.id}")
+
+    assert resp.status_code == 200
+    assert resp.json()["removed_admin"] is True
+    jam_data = client_a.get(f"/jams/{jam['id']}").json()
+    assert user_b.id not in jam_data["admin_ids"]
+    participants = client_a.get(f"/jams/{jam['id']}/participants").json()
+    assert user_b.id not in [participant["user"]["id"] for participant in participants]
 
 
 def test_remove_admin_already_removed_is_idempotent(client_a, client_b, user_b):

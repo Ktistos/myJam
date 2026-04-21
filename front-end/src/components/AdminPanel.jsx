@@ -70,10 +70,15 @@ const AdminPanel = ({
     <button
       type="button"
       onClick={onChange}
-      className={`relative w-10 h-5 rounded-full transition-colors focus:outline-none ${value ? 'bg-yellow-500' : 'bg-gray-600'}`}
+      aria-pressed={value}
+      className={`relative inline-flex h-5 w-10 flex-none shrink-0 items-center rounded-full p-0.5 transition-colors focus:outline-none focus:ring-2 focus:ring-yellow-400/60 ${
+        value ? 'bg-yellow-500' : 'bg-gray-600'
+      }`}
     >
       <span
-        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`}
+        className={`block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+          value ? 'translate-x-5' : 'translate-x-0'
+        }`}
       />
     </button>
   );
@@ -134,21 +139,21 @@ const AdminPanel = ({
                   value={jam.settings.requireRoleApproval}
                   onChange={() => onUpdateSettings(jam.id, { requireRoleApproval: !jam.settings.requireRoleApproval })}
                 />
-                <span className="text-sm text-gray-200">Require admin approval for role assignments</span>
+                <span className="min-w-0 text-sm leading-5 text-gray-200">Require admin approval for role assignments</span>
               </label>
               <label className="flex items-center gap-3 cursor-pointer">
                 <Toggle
                   value={jam.settings.requireSongApproval}
                   onChange={() => onUpdateSettings(jam.id, { requireSongApproval: !jam.settings.requireSongApproval })}
                 />
-                <span className="text-sm text-gray-200">Require admin approval for song submissions</span>
+                <span className="min-w-0 text-sm leading-5 text-gray-200">Require admin approval for song submissions</span>
               </label>
               <label className="flex items-center gap-3 cursor-pointer">
                 <Toggle
                   value={jam.settings.requireHardwareApproval}
                   onChange={() => onUpdateSettings(jam.id, { requireHardwareApproval: !jam.settings.requireHardwareApproval })}
                 />
-                <span className="text-sm text-gray-200">Require admin approval for hardware submissions</span>
+                <span className="min-w-0 text-sm leading-5 text-gray-200">Require admin approval for hardware submissions</span>
               </label>
             </div>
           </section>
