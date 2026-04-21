@@ -272,6 +272,89 @@ def test_import_spotify_playlist_uses_api_when_configured(client_a, monkeypatch)
     assert len(playlist_api_requests) == 2
 
 
+def test_import_spotify_playlist_prefers_connected_user_token(client_a, db_session, user_a, monkeypatch):
+    db_session.add(SpotifyConnection(
+        user_id=user_a.id,
+        access_token="user-token",
+        refresh_token="refresh-token",
+        scope="playlist-read-private",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    ))
+    db_session.commit()
+
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        requests.append(request)
+        assert "api.spotify.com/v1/playlists/abc123/items" in request.full_url
+        assert request.get_header("Authorization") == "Bearer user-token"
+        return FakeResponse(json.dumps({
+            "items": [
+                {"track": {"type": "track", "name": "User Playlist Song", "artists": [{"name": "User Artist"}]}},
+            ],
+            "next": None,
+            "total": 1,
+        }))
+
+    monkeypatch.setattr(songs_router, "urlopen", fake_urlopen)
+
+    resp = client_a.post(
+        "/songs/import/playlist",
+        json={"url": "https://open.spotify.com/playlist/abc123"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["songs"] == [{"title": "User Playlist Song", "artist": "User Artist"}]
+    assert len(requests) == 1
+
+
+def test_import_spotify_playlist_refreshes_expired_user_token(client_a, db_session, user_a, monkeypatch):
+    _enable_spotify_api(monkeypatch)
+    db_session.add(SpotifyConnection(
+        user_id=user_a.id,
+        access_token="expired-token",
+        refresh_token="refresh-token",
+        scope="playlist-read-private",
+        expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+    ))
+    db_session.commit()
+
+    def fake_token_urlopen(request, timeout):
+        del timeout
+        body = parse_qs(request.data.decode("utf-8"))
+        assert body["grant_type"] == ["refresh_token"]
+        assert body["refresh_token"] == ["refresh-token"]
+        return FakeResponse(json.dumps({
+            "access_token": "refreshed-token",
+            "expires_in": 3600,
+        }))
+
+    def fake_playlist_urlopen(request, timeout):
+        del timeout
+        assert "api.spotify.com/v1/playlists/abc123/items" in request.full_url
+        assert request.get_header("Authorization") == "Bearer refreshed-token"
+        return FakeResponse(json.dumps({
+            "items": [
+                {"track": {"type": "track", "name": "Refreshed Song", "artists": [{"name": "Refreshed Artist"}]}},
+            ],
+            "next": None,
+            "total": 1,
+        }))
+
+    monkeypatch.setattr(spotify_core, "urlopen", fake_token_urlopen)
+    monkeypatch.setattr(songs_router, "urlopen", fake_playlist_urlopen)
+
+    resp = client_a.post(
+        "/songs/import/playlist",
+        json={"url": "https://open.spotify.com/playlist/abc123"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["songs"] == [{"title": "Refreshed Song", "artist": "Refreshed Artist"}]
+    assert db_session.get(SpotifyConnection, user_a.id).access_token == "refreshed-token"
+
+
 def test_import_spotify_playlist_falls_back_to_page_parser_when_api_denied(client_a, monkeypatch):
     _enable_spotify_api(monkeypatch)
     spotify_html = """
@@ -562,6 +645,185 @@ def test_import_youtube_playlist_reads_playlist_video_renderers(client_a, monkey
         {"title": "Use Me", "artist": "Bill Withers"},
         {"title": "Valerie", "artist": "Amy Winehouse"},
     ]
+
+
+def test_import_youtube_video_metadata_defaults_artist_when_oembed_has_no_author(client_a, monkeypatch):
+    monkeypatch.setattr(
+        songs_router,
+        "urlopen",
+        _fake_urlopen_for(
+            {"youtube.com/oembed": json.dumps({"title": "Some Live Set"})},
+        ),
+    )
+
+    resp = client_a.post(
+        "/songs/import/metadata",
+        json={"url": "https://www.youtube.com/watch?v=abc123"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["artist"] == "YouTube"
+
+
+def test_import_youtube_video_metadata_errors_when_oembed_title_empty(client_a, monkeypatch):
+    monkeypatch.setattr(
+        songs_router,
+        "urlopen",
+        _fake_urlopen_for(
+            {"youtube.com/oembed": json.dumps({"title": "", "author_name": "Channel"})},
+        ),
+    )
+
+    resp = client_a.post(
+        "/songs/import/metadata",
+        json={"url": "https://www.youtube.com/watch?v=abc123"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Could not read YouTube video title"
+
+
+def test_import_youtu_be_short_url_accepted_and_calls_oembed(client_a, monkeypatch):
+    seen = []
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        seen.append(request.full_url)
+        return FakeResponse(json.dumps({"title": "Redbone", "author_name": "Childish Gambino"}))
+
+    monkeypatch.setattr(songs_router, "urlopen", fake_urlopen)
+
+    resp = client_a.post(
+        "/songs/import/metadata",
+        json={"url": "https://youtu.be/abc123"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["service"] == "YouTube"
+    assert any("youtube.com/oembed" in url for url in seen)
+
+
+def test_import_youtube_playlist_filters_deleted_and_private_videos(client_a, monkeypatch):
+    youtube_html = """
+    <script>
+    var ytInitialData = {
+      "contents": {
+        "items": [
+          {"playlistVideoRenderer": {
+            "title": {"runs": [{"text": "Use Me"}]},
+            "shortBylineText": {"runs": [{"text": "Bill Withers"}]}
+          }},
+          {"playlistVideoRenderer": {
+            "title": {"simpleText": "Deleted video"},
+            "shortBylineText": {"runs": [{"text": "YouTube"}]}
+          }},
+          {"playlistVideoRenderer": {
+            "title": {"simpleText": "Private video"},
+            "shortBylineText": {"runs": [{"text": "YouTube"}]}
+          }},
+          {"playlistVideoRenderer": {
+            "title": {"runs": [{"text": "Valerie"}]},
+            "shortBylineText": {"runs": [{"text": "Amy Winehouse"}]}
+          }}
+        ]
+      }
+    };
+    </script>
+    """
+    monkeypatch.setattr(
+        songs_router,
+        "urlopen",
+        _fake_urlopen_for({"youtube.com/playlist": youtube_html}),
+    )
+
+    resp = client_a.post(
+        "/songs/import/playlist",
+        json={"url": "https://www.youtube.com/playlist?list=PL123"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["songs"] == [
+        {"title": "Use Me", "artist": "Bill Withers"},
+        {"title": "Valerie", "artist": "Amy Winehouse"},
+    ]
+
+
+def test_import_youtube_playlist_dedupes_duplicate_entries(client_a, monkeypatch):
+    youtube_html = """
+    <script>
+    var ytInitialData = {
+      "contents": {
+        "items": [
+          {"playlistVideoRenderer": {
+            "title": {"runs": [{"text": "Use Me"}]},
+            "shortBylineText": {"runs": [{"text": "Bill Withers"}]}
+          }},
+          {"playlistVideoRenderer": {
+            "title": {"runs": [{"text": "use me"}]},
+            "shortBylineText": {"runs": [{"text": "BILL WITHERS"}]}
+          }}
+        ]
+      }
+    };
+    </script>
+    """
+    monkeypatch.setattr(
+        songs_router,
+        "urlopen",
+        _fake_urlopen_for({"youtube.com/playlist": youtube_html}),
+    )
+
+    resp = client_a.post(
+        "/songs/import/playlist",
+        json={"url": "https://www.youtube.com/playlist?list=PL123"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["songs"] == [{"title": "Use Me", "artist": "Bill Withers"}]
+
+
+def test_import_youtube_playlist_errors_when_html_has_no_tracks(client_a, monkeypatch):
+    monkeypatch.setattr(
+        songs_router,
+        "urlopen",
+        _fake_urlopen_for({"youtube.com/playlist": "<html><body>No renderers here</body></html>"}),
+    )
+
+    resp = client_a.post(
+        "/songs/import/playlist",
+        json={"url": "https://www.youtube.com/playlist?list=PL123"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Could not read songs from YouTube playlist"
+
+
+def test_import_youtube_playlist_accepts_watch_url_with_list_param(client_a, monkeypatch):
+    youtube_html = """
+    <script>
+    var ytInitialData = {
+      "contents": {"items": [
+        {"playlistVideoRenderer": {
+          "title": {"runs": [{"text": "Song A"}]},
+          "shortBylineText": {"runs": [{"text": "Artist A"}]}
+        }}
+      ]}
+    };
+    </script>
+    """
+    monkeypatch.setattr(
+        songs_router,
+        "urlopen",
+        _fake_urlopen_for({"youtube.com/watch": youtube_html}),
+    )
+
+    resp = client_a.post(
+        "/songs/import/playlist",
+        json={"url": "https://www.youtube.com/watch?v=abc&list=PL123"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["service"] == "YouTube"
 
 
 def test_import_song_metadata_rejects_playlist_urls(client_a):

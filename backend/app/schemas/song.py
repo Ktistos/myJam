@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 class SongCreate(BaseModel):
     title: str
     artist: str = ""
+    status: str | None = None
 
 
 class SongImportRequest(BaseModel):

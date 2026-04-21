@@ -826,7 +826,13 @@ async def submit_song(
     if not _get_locked_participant_row(db, jam_id, current_user.id):
         raise HTTPException(status_code=403, detail="Must be a participant to submit songs")
 
-    song_status = "pending" if jam.require_song_approval else "approved"
+    if body.status is not None:
+        requested_status = _normalize_song_status(body.status)
+        if requested_status != "pending":
+            raise HTTPException(status_code=403, detail="Cannot submit pre-approved songs")
+        song_status = "pending"
+    else:
+        song_status = "pending" if jam.require_song_approval else "approved"
     song = Song(jam_id=jam_id, title=_normalize_required_text(body.title, "Song title"), artist=body.artist.strip(),
                 status=song_status, submitted_by=current_user.id)
     db.add(song)

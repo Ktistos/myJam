@@ -150,26 +150,26 @@ test.describe('Active browser options', () => {
     await expect(page.getByText(/CODE2/i)).toHaveCount(0);
   });
 
-  test('imports multiple songs from pasted playlist text', async ({ page }) => {
+  test('imports multiple songs from manual title and artist rows', async ({ page }) => {
     await openSignedInApp(page);
 
     await page.getByText('House Band Rehearsal').click();
     await page.getByRole('button', { name: /import/i }).first().click();
 
     await expect(page.getByRole('heading', { name: /import songs/i })).toBeVisible();
-    await page.getByRole('button', { name: /playlist text/i }).click();
-    await page.getByLabel(/^playlist$/i).fill('Use Me - Bill Withers\nValerie by Amy Winehouse');
-    await page.getByRole('button', { name: /preview playlist/i }).click();
-
-    await expect(page.getByLabel(/song 1 title/i)).toHaveValue('Use Me');
-    await expect(page.getByLabel(/song 2 title/i)).toHaveValue('Valerie');
+    await page.getByRole('button', { name: /manual entry/i }).click();
+    await page.getByLabel(/manual song 1 title/i).fill('Use Me');
+    await page.getByLabel(/manual song 1 artist/i).fill('Bill Withers');
+    await page.getByLabel(/manual song 2 title/i).fill('Valerie');
+    await page.getByLabel(/manual song 2 artist/i).fill('Amy Winehouse');
 
     await page.getByRole('button', { name: /import 2 songs/i }).click();
-    await expect(page.getByRole('heading', { name: /imported/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /submitted/i })).toBeVisible();
     await page.getByRole('button', { name: /close/i }).click();
 
-    await expect(page.getByText('Use Me')).toBeVisible();
-    await expect(page.getByText('Valerie')).toBeVisible();
+    await expect(page.getByTestId('proposed-songs-section').getByText('Use Me')).toBeVisible();
+    await expect(page.getByTestId('proposed-songs-section').getByText('Valerie')).toBeVisible();
+    await expect(page.getByTestId('current-playlist-section').getByText('Use Me')).toHaveCount(0);
   });
 
   test('imports one song from a Spotify track link', async ({ page }) => {
@@ -184,10 +184,30 @@ test.describe('Active browser options', () => {
       .fill('https://open.spotify.com/track/mock-track-id');
     await page.getByRole('button', { name: /import song/i }).click();
 
-    await expect(page.getByRole('heading', { name: /^added$/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^submitted$/i })).toBeVisible();
     await page.getByRole('button', { name: /close/i }).click();
-    await expect(page.getByText('Mock Spotify Song')).toBeVisible();
-    await expect(page.getByText('Mock Spotify Artist')).toBeVisible();
+    await expect(page.getByTestId('proposed-songs-section').getByText('Mock Spotify Song')).toBeVisible();
+    await expect(page.getByTestId('proposed-songs-section').getByText('Mock Spotify Artist')).toBeVisible();
+    await expect(page.getByTestId('current-playlist-section').getByText('Mock Spotify Song')).toHaveCount(0);
+  });
+
+  test('imports one song from a YouTube video link', async ({ page }) => {
+    await openSignedInApp(page);
+
+    await page.getByText('House Band Rehearsal').click();
+    await page.getByRole('button', { name: /import/i }).first().click();
+
+    await expect(page.getByRole('heading', { name: /import songs/i })).toBeVisible();
+    await page
+      .getByPlaceholder(/spotify|youtube/i)
+      .fill('https://www.youtube.com/watch?v=mock-video-id');
+    await page.getByRole('button', { name: /import song/i }).click();
+
+    await expect(page.getByRole('heading', { name: /^submitted$/i })).toBeVisible();
+    await page.getByRole('button', { name: /close/i }).click();
+    await expect(page.getByTestId('proposed-songs-section').getByText('Mock YouTube Song')).toBeVisible();
+    await expect(page.getByTestId('proposed-songs-section').getByText('Mock YouTube Artist')).toBeVisible();
+    await expect(page.getByTestId('current-playlist-section').getByText('Mock YouTube Song')).toHaveCount(0);
   });
 
   test('imports multiple songs from a Spotify playlist link', async ({ page }) => {
@@ -201,16 +221,42 @@ test.describe('Active browser options', () => {
     await page
       .getByPlaceholder(/playlist/i)
       .fill('https://open.spotify.com/playlist/mock-playlist-id');
-    await page.getByRole('button', { name: /preview playlist/i }).click();
+    await page.getByRole('button', { name: /continue without spotify/i }).click();
 
     await expect(page.getByLabel(/song 1 title/i)).toHaveValue('Mock Playlist Song');
     await expect(page.getByLabel(/song 2 title/i)).toHaveValue('Second Playlist Song');
 
     await page.getByRole('button', { name: /import 2 songs/i }).click();
-    await expect(page.getByRole('heading', { name: /imported/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /submitted/i })).toBeVisible();
     await page.getByRole('button', { name: /close/i }).click();
 
-    await expect(page.getByText('Mock Playlist Song')).toBeVisible();
-    await expect(page.getByText('Second Playlist Song')).toBeVisible();
+    await expect(page.getByTestId('proposed-songs-section').getByText('Mock Playlist Song')).toBeVisible();
+    await expect(page.getByTestId('proposed-songs-section').getByText('Second Playlist Song')).toBeVisible();
+    await expect(page.getByTestId('current-playlist-section').getByText('Mock Playlist Song')).toHaveCount(0);
+  });
+
+  test('imports multiple songs from a YouTube playlist link', async ({ page }) => {
+    await openSignedInApp(page);
+
+    await page.getByText('House Band Rehearsal').click();
+    await page.getByRole('button', { name: /import/i }).first().click();
+
+    await expect(page.getByRole('heading', { name: /import songs/i })).toBeVisible();
+    await page.getByRole('button', { name: /playlist link/i }).click();
+    await page
+      .getByPlaceholder(/playlist/i)
+      .fill('https://www.youtube.com/playlist?list=mock-youtube-playlist');
+    await page.getByRole('button', { name: /preview playlist/i }).click();
+
+    await expect(page.getByLabel(/song 1 title/i)).toHaveValue('Mock YouTube Playlist Song');
+    await expect(page.getByLabel(/song 2 title/i)).toHaveValue('Second YouTube Playlist Song');
+
+    await page.getByRole('button', { name: /import 2 songs/i }).click();
+    await expect(page.getByRole('heading', { name: /submitted/i })).toBeVisible();
+    await page.getByRole('button', { name: /close/i }).click();
+
+    await expect(page.getByTestId('proposed-songs-section').getByText('Mock YouTube Playlist Song')).toBeVisible();
+    await expect(page.getByTestId('proposed-songs-section').getByText('Second YouTube Playlist Song')).toBeVisible();
+    await expect(page.getByTestId('current-playlist-section').getByText('Mock YouTube Playlist Song')).toHaveCount(0);
   });
 });
