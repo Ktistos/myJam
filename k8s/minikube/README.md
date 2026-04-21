@@ -51,29 +51,48 @@ bash scripts/minikube-deploy.sh
 ```
 
 The deploy script applies the static manifests and then sets the backend/frontend
-image references from `BACKEND_IMAGE` and `FRONTEND_IMAGE`. The defaults are:
+image references from `BACKEND_IMAGE` and `FRONTEND_IMAGE`. The current checked-in
+defaults are the pushed multi-arch Docker Hub images:
 
-- `jam-backend:minikube`
-- `jam-frontend:minikube`
+- `docker.io/ktistos/myjam-backend:dev-204a4ab-20260419191921`
+- `docker.io/ktistos/myjam-frontend:dev-204a4ab-20260419191921`
+
+If `.k8s-images.env` exists, `scripts/minikube-env.sh` and
+`scripts/minikube-deploy.sh` load those last published image refs by default.
+Explicit `BACKEND_IMAGE` and `FRONTEND_IMAGE` values still win.
 
 ## Images and Registries
 
-For Minikube, you do not need an external registry if you build directly into
-the Minikube Docker daemon:
+For Minikube, you can still skip the external registry by building directly into
+the Minikube Docker daemon and deploying those local tags explicitly:
 
 ```bash
+export BACKEND_IMAGE=jam-backend:minikube
+export FRONTEND_IMAGE=jam-frontend:minikube
 bash scripts/minikube-build-images.sh
+bash scripts/minikube-deploy.sh
 ```
 
 For a real Kubernetes cluster, you should assume that you do need registry-hosted
 images. The common pattern is:
 
 ```bash
-export BACKEND_IMAGE_REPO=ghcr.io/your-org/myjam-backend
-export FRONTEND_IMAGE_REPO=ghcr.io/your-org/myjam-frontend
+export BACKEND_IMAGE_REPO=docker.io/your-namespace/myjam-backend
+export FRONTEND_IMAGE_REPO=docker.io/your-namespace/myjam-frontend
 export IMAGE_TAG=$(git rev-parse --short HEAD)
 export VITE_API_URL=https://jam.example.com
 bash scripts/publish-and-redeploy.sh all
+```
+
+The current manual Docker Hub publish used:
+
+```bash
+BACKEND_IMAGE_REPO=docker.io/ktistos/myjam-backend \
+FRONTEND_IMAGE_REPO=docker.io/ktistos/myjam-frontend \
+IMAGE_TAG=dev-204a4ab-20260419191921 \
+IMAGE_PLATFORMS=linux/amd64,linux/arm64 \
+PUSH_IMAGES=1 \
+bash scripts/build-images.sh all
 ```
 
 If you only changed one component:

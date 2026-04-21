@@ -4,6 +4,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 : "${MINIKUBE_PROFILE:=minikube}"
 : "${MINIKUBE_IP:=$(minikube -p "${MINIKUBE_PROFILE}" ip 2>/dev/null || echo 127.0.0.1)}"
+DEFAULT_BACKEND_IMAGE="docker.io/ktistos/myjam-backend:dev-204a4ab-20260419191921"
+DEFAULT_FRONTEND_IMAGE="docker.io/ktistos/myjam-frontend:dev-204a4ab-20260419191921"
+REQUESTED_BACKEND_IMAGE="${BACKEND_IMAGE:-}"
+REQUESTED_FRONTEND_IMAGE="${FRONTEND_IMAGE:-}"
 
 load_env_file() {
   local file="$1"
@@ -18,13 +22,14 @@ load_env_file() {
 
 load_env_file "${ROOT_DIR}/.env"
 load_env_file "${ROOT_DIR}/front-end/.env.local"
+load_env_file "${ROOT_DIR}/.k8s-images.env"
 
 : "${VITE_FIREBASE_PROJECT_ID:=${FIREBASE_PROJECT_ID:-}}"
 
 export MINIKUBE_PROFILE
 export MINIKUBE_IP
-export BACKEND_IMAGE="${BACKEND_IMAGE:-jam-backend:minikube}"
-export FRONTEND_IMAGE="${FRONTEND_IMAGE:-jam-frontend:minikube}"
+export BACKEND_IMAGE="${REQUESTED_BACKEND_IMAGE:-${BACKEND_IMAGE:-${DEFAULT_BACKEND_IMAGE}}}"
+export FRONTEND_IMAGE="${REQUESTED_FRONTEND_IMAGE:-${FRONTEND_IMAGE:-${DEFAULT_FRONTEND_IMAGE}}}"
 export APP_HOST="${APP_HOST:-jam.${MINIKUBE_IP}.nip.io}"
 export MINIO_API_HOST="${MINIO_API_HOST:-minio.jam.${MINIKUBE_IP}.nip.io}"
 export MINIO_CONSOLE_HOST="${MINIO_CONSOLE_HOST:-minio-console.jam.${MINIKUBE_IP}.nip.io}"

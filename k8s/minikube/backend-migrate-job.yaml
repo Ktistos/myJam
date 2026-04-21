@@ -13,7 +13,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migrate
-          image: jam-backend:minikube
+          image: docker.io/ktistos/myjam-backend:dev-204a4ab-20260419191921
           imagePullPolicy: IfNotPresent
           command:
             - alembic

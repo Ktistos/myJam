@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 BACKEND_IMAGE="${BACKEND_IMAGE:-jam-backend:minikube}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-jam-frontend:minikube}"
+MINIKUBE_IMAGE_PLATFORM="${MINIKUBE_IMAGE_PLATFORM:-}"
 
 require_env() {
   local name="$1"
@@ -26,11 +27,18 @@ require_env VITE_FIREBASE_APP_ID
 
 eval "$(minikube -p "${MINIKUBE_PROFILE}" docker-env)"
 
+platform_args=()
+if [[ -n "${MINIKUBE_IMAGE_PLATFORM}" ]]; then
+  platform_args=(--platform "${MINIKUBE_IMAGE_PLATFORM}")
+fi
+
 docker build \
+  "${platform_args[@]}" \
   -t "${BACKEND_IMAGE}" \
   "${ROOT_DIR}/backend"
 
 docker build \
+  "${platform_args[@]}" \
   -t "${FRONTEND_IMAGE}" \
   --build-arg "VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}" \
   --build-arg "VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}" \
@@ -41,4 +49,8 @@ docker build \
   --build-arg "VITE_API_URL=" \
   "${ROOT_DIR}/front-end"
 
-echo "Built ${BACKEND_IMAGE} and ${FRONTEND_IMAGE} inside Minikube profile ${MINIKUBE_PROFILE}."
+if [[ -n "${MINIKUBE_IMAGE_PLATFORM}" ]]; then
+  echo "Built ${BACKEND_IMAGE} and ${FRONTEND_IMAGE} for ${MINIKUBE_IMAGE_PLATFORM} inside Minikube profile ${MINIKUBE_PROFILE}."
+else
+  echo "Built ${BACKEND_IMAGE} and ${FRONTEND_IMAGE} for the Minikube node architecture inside profile ${MINIKUBE_PROFILE}."
+fi
