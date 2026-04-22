@@ -11,6 +11,11 @@ OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-minio-operator}"
 INGRESS_CLASS_NAME="${INGRESS_CLASS_NAME:-nginx}"
 INSTALL_MINIO_OPERATOR="${INSTALL_MINIO_OPERATOR:-1}"
 APPLY_MINIO_INGRESS="${APPLY_MINIO_INGRESS:-1}"
+ENABLE_TLS="${ENABLE_TLS:-0}"
+CERT_MANAGER_CLUSTER_ISSUER="${CERT_MANAGER_CLUSTER_ISSUER:-letsencrypt-prod}"
+ACME_SERVER="${ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"
+APP_TLS_SECRET_NAME="${APP_TLS_SECRET_NAME:-jam-tls}"
+MINIO_TLS_SECRET_NAME="${MINIO_TLS_SECRET_NAME:-jam-minio-tls}"
 MINIO_OPERATOR_REF="${MINIO_OPERATOR_REF:-v7.1.1}"
 MINIO_OPERATOR_REPLICAS="${MINIO_OPERATOR_REPLICAS:-1}"
 MINIO_STORAGE_CLASS_NAME="${MINIO_STORAGE_CLASS_NAME:-}"
@@ -60,6 +65,11 @@ Optional:
   INGRESS_CLASS_NAME         default: nginx
   INSTALL_MINIO_OPERATOR     default: 1
   APPLY_MINIO_INGRESS        default: 1
+  ENABLE_TLS                 default: 0
+  CERT_MANAGER_CLUSTER_ISSUER default: letsencrypt-prod
+  ACME_SERVER                default: Let's Encrypt production
+  APP_TLS_SECRET_NAME        default: jam-tls
+  MINIO_TLS_SECRET_NAME      default: jam-minio-tls
   MINIO_OPERATOR_REF         default: v7.1.1
   MINIO_OPERATOR_REPLICAS    default: 1
   MINIO_STORAGE_CLASS_NAME   default: cluster default storage class
@@ -159,6 +169,45 @@ create_image_pull_secret() {
     --dry-run=client -o yaml | kubectl apply -f -
 }
 
+apply_tls_issuer() {
+  if [[ "${ENABLE_TLS}" != "1" ]]; then
+    return
+  fi
+
+  cat <<EOF | kubectl apply -f -
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ${CERT_MANAGER_CLUSTER_ISSUER}
+spec:
+  acme:
+    server: ${ACME_SERVER}
+    privateKeySecretRef:
+      name: ${CERT_MANAGER_CLUSTER_ISSUER}-account-key
+    solvers:
+      - http01:
+          ingress:
+            class: ${INGRESS_CLASS_NAME}
+EOF
+}
+
+patch_ingress_tls() {
+  local namespace="$1"
+  local name="$2"
+  local host="$3"
+  local secret_name="$4"
+
+  if [[ "${ENABLE_TLS}" != "1" || -z "${host}" ]]; then
+    return
+  fi
+
+  kubectl -n "${namespace}" annotate ingress "${name}" \
+    "cert-manager.io/cluster-issuer=${CERT_MANAGER_CLUSTER_ISSUER}" \
+    --overwrite
+  kubectl -n "${namespace}" patch ingress "${name}" --type=merge \
+    -p "{\"spec\":{\"tls\":[{\"hosts\":[\"${host}\"],\"secretName\":\"${secret_name}\"}]}}"
+}
+
 apply_postgres_secret() {
   kubectl -n "${APP_NAMESPACE}" create secret generic jam-postgres-secrets \
     --from-literal=POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
@@ -250,6 +299,7 @@ echo "Applying namespaces and app configuration..."
 create_namespaces
 install_minio_operator
 create_image_pull_secret
+apply_tls_issuer
 apply_postgres_secret
 apply_backend_config
 apply_minio_tenant_secret
@@ -273,6 +323,7 @@ if [[ "${APPLY_MINIO_INGRESS}" == "1" ]]; then
   else
     awk 'BEGIN { seen = 0 } /^---$/ { exit } { print }' "${TMP_DIR}/minio-ingress.yaml" | kubectl apply -f -
   fi
+  patch_ingress_tls "${STORAGE_NAMESPACE}" jam-minio-api "${MINIO_API_HOST}" "${MINIO_TLS_SECRET_NAME}"
 fi
 
 echo "Running MinIO bucket bootstrap job..."
@@ -294,6 +345,9 @@ patch_image_pull_secret deployment/jam-frontend
 kubectl -n "${APP_NAMESPACE}" set image deployment/jam-backend backend="${BACKEND_IMAGE}"
 kubectl -n "${APP_NAMESPACE}" set image deployment/jam-frontend frontend="${FRONTEND_IMAGE}"
 kubectl apply -f "${TMP_DIR}/app-ingress.yaml"
+patch_ingress_tls "${APP_NAMESPACE}" jam-app "${APP_HOST}" "${APP_TLS_SECRET_NAME}"
+kubectl -n "${APP_NAMESPACE}" rollout restart deployment/jam-backend
+kubectl -n "${APP_NAMESPACE}" rollout restart deployment/jam-frontend
 kubectl -n "${APP_NAMESPACE}" rollout status deployment/jam-backend --timeout=5m
 kubectl -n "${APP_NAMESPACE}" rollout status deployment/jam-frontend --timeout=5m
 

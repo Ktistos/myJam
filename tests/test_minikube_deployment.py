@@ -113,6 +113,12 @@ def test_minikube_scripts_pin_kubectl_context_and_force_rollouts() -> None:
     assert 'MINIO_OPERATOR_REPLICAS="${MINIO_OPERATOR_REPLICAS:-1}"' in cluster_deploy
     assert 'scale deployment/minio-operator --replicas="${MINIO_OPERATOR_REPLICAS}"' in cluster_deploy
     assert 'get pod -l v1.min.io/tenant=jam-minio -o name | grep -q .' in cluster_deploy
+    assert 'ENABLE_TLS="${ENABLE_TLS:-0}"' in cluster_deploy
+    assert "kind: ClusterIssuer" in cluster_deploy
+    assert "cert-manager.io/cluster-issuer" in cluster_deploy
+    assert "patch_ingress_tls" in cluster_deploy
+    assert "rollout restart deployment/jam-backend" in cluster_deploy
+    assert "rollout restart deployment/jam-frontend" in cluster_deploy
 
 
 def test_kubernetes_manifests_default_to_pushed_registry_images() -> None:
