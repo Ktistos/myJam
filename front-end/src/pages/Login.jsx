@@ -23,6 +23,17 @@ function formatAuthError(providerLabel, error) {
     return `${providerLabel} sign-in was cancelled before completion.`;
   }
 
+  if (code === 'auth/account-exists-with-different-credential') {
+    return `${providerLabel} sign-in uses an email that already exists with another sign-in method. Sign in with the existing provider for that email.`;
+  }
+
+  if (
+    providerLabel === 'Facebook' &&
+    ['auth/invalid-credential', 'auth/invalid-oauth-client-id', 'auth/internal-error'].includes(code)
+  ) {
+    return 'Facebook sign-in reached Firebase, but Meta rejected the OAuth setup. In Meta Developers, add the Firebase OAuth redirect URI to Facebook Login > Settings > Valid OAuth Redirect URIs.';
+  }
+
   const detail = error?.message?.trim();
   if (detail) {
     return `${providerLabel} sign-in failed: ${detail}`;

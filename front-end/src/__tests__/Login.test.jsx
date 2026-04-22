@@ -65,4 +65,30 @@ describe('Login', () => {
 
     expect(await screen.findByText(/authorized domains/i)).toBeInTheDocument();
   });
+
+  it('shows the existing-provider message for Facebook account collisions', async () => {
+    const { signInWithFacebook } = await import('../services/firebase');
+    signInWithFacebook.mockRejectedValue({
+      code: 'auth/account-exists-with-different-credential',
+      message: 'Firebase: Error (auth/account-exists-with-different-credential).',
+    });
+
+    render(<Login onGuest={() => {}} />);
+    fireEvent.click(screen.getByText(/continue with facebook/i));
+
+    expect(await screen.findByText(/already exists with another sign-in method/i)).toBeInTheDocument();
+  });
+
+  it('shows Meta OAuth setup guidance for Facebook config errors', async () => {
+    const { signInWithFacebook } = await import('../services/firebase');
+    signInWithFacebook.mockRejectedValue({
+      code: 'auth/invalid-credential',
+      message: 'Firebase: Error (auth/invalid-credential).',
+    });
+
+    render(<Login onGuest={() => {}} />);
+    fireEvent.click(screen.getByText(/continue with facebook/i));
+
+    expect(await screen.findByText(/valid oauth redirect uris/i)).toBeInTheDocument();
+  });
 });
