@@ -114,7 +114,7 @@ def test_minikube_scripts_pin_kubectl_context_and_force_rollouts() -> None:
     assert 'scale deployment/minio-operator --replicas="${MINIO_OPERATOR_REPLICAS}"' in cluster_deploy
     assert 'get pod -l v1.min.io/tenant=jam-minio -o name | grep -q .' in cluster_deploy
     assert 'ENABLE_TLS="${ENABLE_TLS:-0}"' in cluster_deploy
-    assert 'ENABLE_TLS_REDIRECT="${ENABLE_TLS_REDIRECT:-false}"' in cluster_deploy
+    assert 'ENABLE_TLS_REDIRECT="${ENABLE_TLS_REDIRECT:-true}"' in cluster_deploy
     assert "kind: ClusterIssuer" in cluster_deploy
     assert "cert-manager.io/cluster-issuer" in cluster_deploy
     assert "nginx.ingress.kubernetes.io/ssl-redirect" in cluster_deploy
