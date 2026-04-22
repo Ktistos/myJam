@@ -138,6 +138,7 @@ def test_kubernetes_manifests_default_to_pushed_registry_images() -> None:
 def test_minikube_manifests_include_required_init_and_migration_jobs() -> None:
     migrate_job = (ROOT / "k8s/minikube/backend-migrate-job.yaml").read_text()
     bucket_job = (ROOT / "k8s/minikube/minio-bucket-policy-job.yaml").read_text()
+    app_ingress = (ROOT / "k8s/minikube/app-ingress.yaml").read_text()
 
     assert "kind: Job" in migrate_job
     assert "name: jam-backend-migrate" in migrate_job
@@ -149,6 +150,10 @@ def test_minikube_manifests_include_required_init_and_migration_jobs() -> None:
     assert "name: jam-minio-public-bucket" in bucket_job
     assert "mc mb --ignore-existing jam/avatars" in bucket_job
     assert "mc anonymous set download jam/avatars" in bucket_job
+
+    assert "path: /docs" in app_ingress
+    assert "path: /openapi.json" in app_ingress
+    assert "pathType: Exact" in app_ingress
 
 
 def test_portable_kubernetes_base_renders_required_resources() -> None:
