@@ -12,6 +12,7 @@ INGRESS_CLASS_NAME="${INGRESS_CLASS_NAME:-nginx}"
 INSTALL_MINIO_OPERATOR="${INSTALL_MINIO_OPERATOR:-1}"
 APPLY_MINIO_INGRESS="${APPLY_MINIO_INGRESS:-1}"
 ENABLE_TLS="${ENABLE_TLS:-0}"
+ENABLE_TLS_REDIRECT="${ENABLE_TLS_REDIRECT:-false}"
 CERT_MANAGER_CLUSTER_ISSUER="${CERT_MANAGER_CLUSTER_ISSUER:-letsencrypt-prod}"
 ACME_SERVER="${ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"
 APP_TLS_SECRET_NAME="${APP_TLS_SECRET_NAME:-jam-tls}"
@@ -66,6 +67,7 @@ Optional:
   INSTALL_MINIO_OPERATOR     default: 1
   APPLY_MINIO_INGRESS        default: 1
   ENABLE_TLS                 default: 0
+  ENABLE_TLS_REDIRECT        default: false
   CERT_MANAGER_CLUSTER_ISSUER default: letsencrypt-prod
   ACME_SERVER                default: Let's Encrypt production
   APP_TLS_SECRET_NAME        default: jam-tls
@@ -203,6 +205,7 @@ patch_ingress_tls() {
 
   kubectl -n "${namespace}" annotate ingress "${name}" \
     "cert-manager.io/cluster-issuer=${CERT_MANAGER_CLUSTER_ISSUER}" \
+    "nginx.ingress.kubernetes.io/ssl-redirect=${ENABLE_TLS_REDIRECT}" \
     --overwrite
   kubectl -n "${namespace}" patch ingress "${name}" --type=merge \
     -p "{\"spec\":{\"tls\":[{\"hosts\":[\"${host}\"],\"secretName\":\"${secret_name}\"}]}}"
