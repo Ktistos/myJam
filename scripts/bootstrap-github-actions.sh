@@ -96,15 +96,18 @@ load_env_file "${ROOT_DIR}/front-end/.env.local"
 : "${MINIO_OPERATOR_REF:=v7.1.1}"
 : "${MINIO_STORAGE_SIZE:=10Gi}"
 : "${SPOTIFY_MARKET:=US}"
-: "${IMAGE_PULL_SERVER:=ghcr.io}"
+: "${IMAGE_REGISTRY:=docker.io}"
+: "${IMAGE_PULL_SERVER:=${IMAGE_REGISTRY}}"
 
 owner="${REPO%%/*}"
 repo_name="${REPO#*/}"
 owner_lc="$(printf '%s' "${owner}" | tr '[:upper:]' '[:lower:]')"
 repo_lc="$(printf '%s' "${repo_name}" | tr '[:upper:]' '[:lower:]')"
 
-: "${BACKEND_IMAGE_REPO:=ghcr.io/${owner_lc}/${repo_lc}-backend}"
-: "${FRONTEND_IMAGE_REPO:=ghcr.io/${owner_lc}/${repo_lc}-frontend}"
+: "${BACKEND_IMAGE_REPO:=docker.io/${owner_lc}/${repo_lc}-backend}"
+: "${FRONTEND_IMAGE_REPO:=docker.io/${owner_lc}/${repo_lc}-frontend}"
+: "${IMAGE_REGISTRY_USERNAME:=${DOCKERHUB_USERNAME:-}}"
+: "${IMAGE_REGISTRY_PASSWORD:=${DOCKERHUB_TOKEN:-${DOCKERHUB_PASSWORD:-}}}"
 
 require_env() {
   local name="$1"
@@ -129,6 +132,8 @@ set_repo_secret() {
 if [[ "${TARGET}" == "build" || "${TARGET}" == "all" ]]; then
   require_env BACKEND_IMAGE_REPO
   require_env FRONTEND_IMAGE_REPO
+  require_env IMAGE_REGISTRY_USERNAME
+  require_env IMAGE_REGISTRY_PASSWORD
   require_env FIREBASE_PROJECT_ID
   require_env VITE_FIREBASE_API_KEY
   require_env VITE_FIREBASE_AUTH_DOMAIN
@@ -139,8 +144,11 @@ if [[ "${TARGET}" == "build" || "${TARGET}" == "all" ]]; then
 
   set_repo_variable BACKEND_IMAGE_REPO "${BACKEND_IMAGE_REPO}"
   set_repo_variable FRONTEND_IMAGE_REPO "${FRONTEND_IMAGE_REPO}"
+  set_repo_variable IMAGE_REGISTRY "${IMAGE_REGISTRY}"
   set_repo_variable VITE_API_URL "${VITE_API_URL:-}"
 
+  set_repo_secret IMAGE_REGISTRY_USERNAME "${IMAGE_REGISTRY_USERNAME}"
+  set_repo_secret IMAGE_REGISTRY_PASSWORD "${IMAGE_REGISTRY_PASSWORD}"
   set_repo_secret FIREBASE_PROJECT_ID "${FIREBASE_PROJECT_ID}"
   set_repo_secret VITE_FIREBASE_API_KEY "${VITE_FIREBASE_API_KEY}"
   set_repo_secret VITE_FIREBASE_AUTH_DOMAIN "${VITE_FIREBASE_AUTH_DOMAIN}"

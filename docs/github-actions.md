@@ -1,6 +1,6 @@
 # GitHub Repo and CI/CD Setup
 
-This repo is ready to host a `GitHub Actions + GHCR + Kubernetes` pipeline even
+This repo is ready to host a `GitHub Actions + Docker Hub + Kubernetes` pipeline even
 before the GitHub repository exists. The workflow file is:
 
 - [build-and-deploy.yml](../.github/workflows/build-and-deploy.yml)
@@ -9,7 +9,7 @@ before the GitHub repository exists. The workflow file is:
 The pipeline does two things on every push to `main`:
 
 1. Builds the backend and frontend images.
-2. Pushes both images to GHCR and deploys the app stack to your cluster.
+2. Pushes both images to Docker Hub and deploys the app stack to your cluster.
 
 If the repository is not configured yet, the workflow now exits cleanly and
 marks build/deploy as skipped instead of failing hard on missing secrets.
@@ -55,6 +55,11 @@ What still must exist in your shell before `deploy`:
 - `MINIO_ROOT_PASSWORD`
 - `KUBECONFIG_B64`
 
+What must exist before `build`:
+
+- `IMAGE_REGISTRY_USERNAME`
+- `IMAGE_REGISTRY_PASSWORD`
+
 If `gh` is not installed, use the manual variables/secrets sections below.
 
 ## Important Constraint
@@ -75,9 +80,9 @@ Set these in `Settings -> Secrets and variables -> Actions -> Variables`.
 Required:
 
 - `BACKEND_IMAGE_REPO`
-  - example: `ghcr.io/OWNER/myjam-backend`
+  - example: `docker.io/OWNER/myjam-backend`
 - `FRONTEND_IMAGE_REPO`
-  - example: `ghcr.io/OWNER/myjam-frontend`
+  - example: `docker.io/OWNER/myjam-frontend`
 - `APP_HOST`
   - example: `jam.example.com`
 - `MINIO_API_HOST`
@@ -85,6 +90,8 @@ Required:
 
 Optional:
 
+- `IMAGE_REGISTRY`
+  - default: `docker.io`
 - `K8S_NAMESPACE`
   - default: `jam`
 - `K8S_STORAGE_NAMESPACE`
@@ -116,12 +123,12 @@ Optional:
 - `SPOTIFY_MARKET`
   - default: `US`
 
-Only if GHCR images stay private:
+Only if registry images stay private:
 
 - `IMAGE_PULL_SECRET_NAME`
-  - example: `ghcr-pull`
+  - example: `registry-pull`
 - `IMAGE_PULL_SERVER`
-  - default: `ghcr.io`
+  - default: `docker.io`
 - `IMAGE_PULL_EMAIL`
   - optional placeholder email for the registry secret
 
@@ -133,6 +140,10 @@ Required:
 
 - `KUBECONFIG_B64`
   - base64-encoded kubeconfig for the target cluster
+- `IMAGE_REGISTRY_USERNAME`
+  - Docker Hub username, or the username for the registry in `IMAGE_REGISTRY`
+- `IMAGE_REGISTRY_PASSWORD`
+  - Docker Hub access token/password, or the password/token for `IMAGE_REGISTRY`
 - `FIREBASE_PROJECT_ID`
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
@@ -148,13 +159,13 @@ Optional:
 - `SPOTIFY_CLIENT_ID`
 - `SPOTIFY_CLIENT_SECRET`
 
-Only if GHCR images stay private:
+Only if registry images stay private:
 
 - `IMAGE_PULL_USERNAME`
 - `IMAGE_PULL_PASSWORD`
 
-For GHCR, `IMAGE_PULL_USERNAME` is usually your GitHub username and
-`IMAGE_PULL_PASSWORD` is a token with `read:packages`.
+For Docker Hub private images, `IMAGE_PULL_USERNAME` is your Docker Hub username
+and `IMAGE_PULL_PASSWORD` is a Docker Hub access token/password.
 
 ## First Deploy
 

@@ -50,6 +50,10 @@ def test_github_actions_builds_multi_arch_images() -> None:
     assert "docker/setup-qemu-action@v3" in workflow
     assert "platforms: arm64,amd64" in workflow
     assert "docker/setup-buildx-action@v3" in workflow
+    assert "Log in to image registry" in workflow
+    assert "IMAGE_REGISTRY_USERNAME" in workflow
+    assert "IMAGE_REGISTRY_PASSWORD" in workflow
+    assert "ghcr.io" not in workflow
 
 
 def test_image_scripts_have_valid_shell_syntax() -> None:

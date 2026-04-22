@@ -109,7 +109,7 @@ The scripts write the last published image refs to `.k8s-images.env`, and
 `scripts/redeploy-images.sh` reuses that file so you can redeploy without
 retyping the exact tags.
 
-For GitHub Actions + GHCR deployment to a reachable cluster, see
+For GitHub Actions + Docker Hub deployment to a reachable cluster, see
 [docs/github-actions.md](../../docs/github-actions.md).
 
 ## Required Environment
