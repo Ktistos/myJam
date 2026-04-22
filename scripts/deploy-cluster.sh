@@ -12,6 +12,7 @@ INGRESS_CLASS_NAME="${INGRESS_CLASS_NAME:-nginx}"
 INSTALL_MINIO_OPERATOR="${INSTALL_MINIO_OPERATOR:-1}"
 APPLY_MINIO_INGRESS="${APPLY_MINIO_INGRESS:-1}"
 MINIO_OPERATOR_REF="${MINIO_OPERATOR_REF:-v7.1.1}"
+MINIO_OPERATOR_REPLICAS="${MINIO_OPERATOR_REPLICAS:-1}"
 MINIO_STORAGE_CLASS_NAME="${MINIO_STORAGE_CLASS_NAME:-}"
 MINIO_STORAGE_SIZE="${MINIO_STORAGE_SIZE:-10Gi}"
 
@@ -60,6 +61,7 @@ Optional:
   INSTALL_MINIO_OPERATOR     default: 1
   APPLY_MINIO_INGRESS        default: 1
   MINIO_OPERATOR_REF         default: v7.1.1
+  MINIO_OPERATOR_REPLICAS    default: 1
   MINIO_STORAGE_CLASS_NAME   default: cluster default storage class
   MINIO_STORAGE_SIZE         default: 10Gi
   APP_BASE_URL               default: https://APP_HOST
@@ -137,6 +139,7 @@ install_minio_operator() {
 
   echo "Installing/refreshing MinIO Operator ${MINIO_OPERATOR_REF}..."
   kubectl apply -k "github.com/minio/operator?ref=${MINIO_OPERATOR_REF}"
+  kubectl -n "${OPERATOR_NAMESPACE}" scale deployment/minio-operator --replicas="${MINIO_OPERATOR_REPLICAS}"
   kubectl -n "${OPERATOR_NAMESPACE}" rollout status deployment/minio-operator --timeout=5m
 }
 
@@ -259,6 +262,9 @@ kubectl -n "${APP_NAMESPACE}" rollout status deployment/redis --timeout=5m
 
 echo "Deploying MinIO tenant..."
 kubectl apply -f "${TMP_DIR}/minio-tenant.yaml"
+until kubectl -n "${STORAGE_NAMESPACE}" get pod -l v1.min.io/tenant=jam-minio -o name | grep -q .; do
+  sleep 2
+done
 kubectl -n "${STORAGE_NAMESPACE}" wait --for=condition=Ready pod -l v1.min.io/tenant=jam-minio --timeout=10m
 
 if [[ "${APPLY_MINIO_INGRESS}" == "1" ]]; then

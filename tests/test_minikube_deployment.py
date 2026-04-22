@@ -99,6 +99,7 @@ def fetch(url: str) -> tuple[int, bytes]:
 def test_minikube_scripts_pin_kubectl_context_and_force_rollouts() -> None:
     minikube_deploy = (ROOT / "scripts/minikube-deploy.sh").read_text()
     portable_apply = (ROOT / "scripts/k8s-apply.sh").read_text()
+    cluster_deploy = (ROOT / "scripts/deploy-cluster.sh").read_text()
 
     assert 'KUBE_CONTEXT="${KUBE_CONTEXT:-${MINIKUBE_PROFILE}}"' in minikube_deploy
     assert 'KUBE_CONTEXT="${KUBE_CONTEXT:-minikube}"' in portable_apply
@@ -109,6 +110,9 @@ def test_minikube_scripts_pin_kubectl_context_and_force_rollouts() -> None:
     assert 'kubectl --context "${KUBE_CONTEXT}" "$@"' in portable_apply
     assert "rollout restart deployment/jam-backend" in minikube_deploy
     assert "rollout restart deployment/jam-frontend" in minikube_deploy
+    assert 'MINIO_OPERATOR_REPLICAS="${MINIO_OPERATOR_REPLICAS:-1}"' in cluster_deploy
+    assert 'scale deployment/minio-operator --replicas="${MINIO_OPERATOR_REPLICAS}"' in cluster_deploy
+    assert 'get pod -l v1.min.io/tenant=jam-minio -o name | grep -q .' in cluster_deploy
 
 
 def test_kubernetes_manifests_default_to_pushed_registry_images() -> None:
